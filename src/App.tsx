@@ -1,13 +1,32 @@
+import { Navigate, Route, BrowserRouter, Routes } from "react-router-dom";
+import { ThemeProvider } from "@/hooks/useTheme";
+import { AppLayout } from "@/components/layout/AppLayout";
+import { PlaceholderPage } from "@/components/layout/PlaceholderPage";
+import { navGroups, topLevelLinks } from "@/components/layout/navConfig";
+
+const allRoutes = [
+  ...topLevelLinks,
+  ...navGroups.flatMap((group) => group.children),
+];
+
 function App() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
-      <div className="text-center">
-        <h1 className="text-2xl font-medium">Farol ID</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Scaffold em andamento — shell, sidebar e tema entram na Fase 2.
-        </p>
-      </div>
-    </div>
+    <ThemeProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route index element={<Navigate to="/dashboard" replace />} />
+            {allRoutes.map((route) => (
+              <Route
+                key={route.id}
+                path={route.id}
+                element={<PlaceholderPage title={route.label} />}
+              />
+            ))}
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </ThemeProvider>
   );
 }
 
