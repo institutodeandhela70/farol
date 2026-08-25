@@ -101,3 +101,11 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Área de super admin: acento troca para o tom "platform" (azul frio),
+   reforçando visualmente que é uma área administrativa global. */
+[data-platform="true"] {
+  --primary: var(--platform);
+  --primary-foreground: var(--platform-foreground);
+  --ring: var(--platform);
+}

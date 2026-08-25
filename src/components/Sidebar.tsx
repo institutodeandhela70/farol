@@ -1,11 +1,12 @@
 import { useMemo, useState, type ComponentType } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronDown, ChevronLeft } from "lucide-react";
+import { ChevronDown, ChevronLeft, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { navGroups, topLevelLinks, type NavGroup, type NavLink } from "@/components/layout/navConfig";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
 import { UserMenu } from "@/components/UserMenu";
+import { usePlatformAdmin } from "@/hooks/usePlatformAdmin";
 
 function Logo({ collapsed }: { collapsed: boolean }) {
   return (
@@ -145,6 +146,7 @@ function SidebarGroup({
 }
 
 export function Sidebar() {
+  const { isAdmin: isPlatformAdmin } = usePlatformAdmin();
   const location = useLocation();
   const currentPath = location.pathname.replace(/^\//, "");
   const [collapsed, setCollapsed] = useState(false);
@@ -213,6 +215,21 @@ export function Sidebar() {
       </nav>
 
       <div className="flex flex-col gap-2 border-t border-sidebar-border p-2">
+        {isPlatformAdmin && (
+          <Link
+            to="/platform"
+            className="flex items-center gap-3 rounded-md bg-platform/10 px-2.5 py-2 text-sm text-platform ring-1 ring-platform/30 hover:bg-platform/15"
+          >
+            <ShieldCheck className="size-4 shrink-0" />
+            <motion.span
+              animate={{ opacity: collapsed ? 0 : 1, width: collapsed ? 0 : "auto" }}
+              transition={{ duration: 0.15 }}
+              className="overflow-hidden whitespace-nowrap"
+            >
+              Plataforma
+            </motion.span>
+          </Link>
+        )}
         <WorkspaceSwitcher collapsed={collapsed} />
         <UserMenu collapsed={collapsed} />
       </div>

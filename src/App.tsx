@@ -4,12 +4,16 @@ import { ThemeProvider } from "@/hooks/useTheme";
 import { AuthProvider } from "@/hooks/useAuth";
 import { WorkspaceProvider } from "@/hooks/WorkspaceProvider";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { PlatformRoute } from "@/components/PlatformRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PlaceholderPage } from "@/components/layout/PlaceholderPage";
 import { navGroups, topLevelLinks } from "@/components/layout/navConfig";
+import { PlatformLayout } from "@/pages/platform/PlatformLayout";
 import AuthPage from "@/pages/Auth";
 import Onboarding from "@/pages/Onboarding";
 import InviteAccept from "@/pages/InviteAccept";
+import PlatformWorkspaces from "@/pages/platform/PlatformWorkspaces";
+import PlatformUsers from "@/pages/platform/PlatformUsers";
 
 const allRoutes = [...topLevelLinks, ...navGroups.flatMap((group) => group.children)];
 
@@ -46,6 +50,14 @@ function App() {
                         element={<PlaceholderPage title={route.label} />}
                       />
                     ))}
+                  </Route>
+                </Route>
+
+                <Route element={<PlatformRoute />}>
+                  <Route path="/platform" element={<PlatformLayout />}>
+                    <Route index element={<Navigate to="/platform/workspaces" replace />} />
+                    <Route path="workspaces" element={<PlatformWorkspaces />} />
+                    <Route path="usuarios" element={<PlatformUsers />} />
                   </Route>
                 </Route>
               </Routes>
