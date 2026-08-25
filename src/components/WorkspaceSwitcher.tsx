@@ -1,15 +1,18 @@
-import { Building2, ChevronsUpDown } from "lucide-react";
+import { Building2, Check, ChevronsUpDown } from "lucide-react";
 import { motion } from "framer-motion";
+import { useWorkspace } from "@/hooks/WorkspaceProvider";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-// Placeholder estático — troca de workspace real entra na Fase 3 (auth + multi-tenant).
 export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
+  const { workspace, memberships, switchWorkspace } = useWorkspace();
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -26,15 +29,21 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
             className="flex flex-1 items-center justify-between gap-1 overflow-hidden whitespace-nowrap"
           >
             <span className="truncate font-medium text-sidebar-foreground">
-              Instituto Deandhela
+              {workspace?.name ?? "Selecionar workspace"}
             </span>
             <ChevronsUpDown className="size-3.5 shrink-0 text-sidebar-foreground/50" />
           </motion.div>
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
-        <DropdownMenuLabel>Workspace</DropdownMenuLabel>
-        <DropdownMenuItem disabled>Instituto Deandhela</DropdownMenuItem>
+        <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {memberships.map((m) => (
+          <DropdownMenuItem key={m.workspace.id} onSelect={() => switchWorkspace(m.workspace.id)}>
+            <span className="flex-1 truncate">{m.workspace.name}</span>
+            {m.workspace.id === workspace?.id && <Check className="ml-2 size-4 text-primary" />}
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );

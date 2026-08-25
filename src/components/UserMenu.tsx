@@ -1,6 +1,7 @@
-import { Moon, Sun, User } from "lucide-react";
+import { LogOut, Moon, Sun, User } from "lucide-react";
 import { motion } from "framer-motion";
 import { useTheme } from "@/hooks/useTheme";
+import { useAuth } from "@/hooks/useAuth";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,9 +11,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-// Placeholder — dados reais de usuário/logout entram na Fase 3 (auth).
 export function UserMenu({ collapsed }: { collapsed: boolean }) {
   const { theme, toggleTheme } = useTheme();
+  const { user, signOut } = useAuth();
 
   return (
     <DropdownMenu>
@@ -29,18 +30,21 @@ export function UserMenu({ collapsed }: { collapsed: boolean }) {
             transition={{ duration: 0.15 }}
             className="overflow-hidden truncate whitespace-nowrap text-sidebar-foreground"
           >
-            Minha conta
+            {user?.email ?? "Minha conta"}
           </motion.span>
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
-        <DropdownMenuLabel>Minha conta</DropdownMenuLabel>
+        <DropdownMenuLabel className="truncate">{user?.email ?? "Minha conta"}</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={toggleTheme}>
+        <DropdownMenuItem onSelect={toggleTheme}>
           {theme === "dark" ? <Sun className="mr-2 size-4" /> : <Moon className="mr-2 size-4" />}
           {theme === "dark" ? "Tema claro" : "Tema escuro"}
         </DropdownMenuItem>
-        <DropdownMenuItem disabled>Sair</DropdownMenuItem>
+        <DropdownMenuItem onSelect={signOut}>
+          <LogOut className="mr-2 size-4" />
+          Sair
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
