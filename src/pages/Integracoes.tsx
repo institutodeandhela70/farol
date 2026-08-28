@@ -13,7 +13,7 @@ interface IntegrationRow {
   status: IntegrationStatus;
   last_synced_at: string | null;
   last_error: string | null;
-  config: { environment?: "sandbox" | "production" };
+  config: { environment?: "sandbox" | "production"; key_preview?: string };
 }
 
 const statusLabel: Record<IntegrationStatus, string> = {
@@ -66,6 +66,9 @@ export default function Integracoes() {
     setSaving(true);
     setFeedback(null);
 
+    const trimmedKey = apiKey.trim();
+    const keyPreview = trimmedKey.slice(-4);
+
     // Nunca fazer upsert incluindo `id` contra um conflict target diferente da PK:
     // se já existir linha para (workspace_id, provider), isso tenta trocar o id dela,
     // o que quebra a FK de integration_secrets assim que um segredo já foi salvo.
@@ -82,7 +85,7 @@ export default function Integracoes() {
     if (integrationId) {
       const { error: updateError } = await supabase
         .from("integrations")
-        .update({ config: { environment } })
+        .update({ config: { environment, key_preview: keyPreview } })
         .eq("id", integrationId);
 
       if (updateError) {
@@ -96,7 +99,7 @@ export default function Integracoes() {
         id: integrationId,
         workspace_id: workspace.id,
         provider: "asaas",
-        config: { environment },
+        config: { environment, key_preview: keyPreview },
       });
 
       if (insertError) {
@@ -111,8 +114,6 @@ export default function Integracoes() {
     // sem SELECT. Por isso: UPDATE simples primeiro (sem-op se a linha não existir) e um
     // INSERT simples depois — se a linha já existia, o INSERT esbarra em conflito de chave
     // (23505), o que é esperado (o UPDATE já cuidou dela) e é ignorado.
-    const trimmedKey = apiKey.trim();
-
     const { error: updateSecretError } = await supabase
       .from("integration_secrets")
       .update({ api_key: trimmedKey })
@@ -212,10 +213,15 @@ export default function Integracoes() {
             <Input
               id="asaas-key"
               type="password"
-              placeholder={integration ? "•••••••• (já salva — cole uma nova pra trocar)" : "Cole a API key do Asaas"}
+              placeholder={integration ? "Cole uma nova chave pra trocar a atual" : "Cole a API key do Asaas"}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
             />
+            {integration?.config.key_preview && (
+              <p className="text-xs text-muted-foreground">
+                Chave salva: •••• {integration.config.key_preview}
+              </p>
+            )}
           </div>
 
           {feedback && (
