@@ -1,7 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const ASAAS_BASE_URL: Record<string, string> = {
-  sandbox: "https://sandbox.asaas.com/api/v3",
+  sandbox: "https://api-sandbox.asaas.com/v3",
   production: "https://api.asaas.com/v3",
 };
 
@@ -59,14 +59,19 @@ Deno.serve(async (req) => {
     const baseUrl = ASAAS_BASE_URL[environment];
 
     const asaasRes = await fetch(`${baseUrl}/payments?limit=100`, {
-      headers: { access_token: secret.api_key },
+      headers: {
+        access_token: secret.api_key,
+        "User-Agent": "FarolID",
+        "Content-Type": "application/json",
+      },
     });
 
     if (!asaasRes.ok) {
       const errText = await asaasRes.text();
+      const storedError = `HTTP ${asaasRes.status} (${environment}): ${errText || "sem corpo de resposta"}`;
       await admin
         .from("integrations")
-        .update({ status: "error", last_error: errText.slice(0, 500) })
+        .update({ status: "error", last_error: storedError.slice(0, 500) })
         .eq("id", integration_id);
       return json({ error: "asaas request failed", detail: errText }, 502);
     }
