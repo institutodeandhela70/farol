@@ -1,3 +1,4 @@
+import type { ComponentType } from "react";
 import { Navigate, Route, BrowserRouter, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "@/hooks/useTheme";
@@ -14,8 +15,15 @@ import Onboarding from "@/pages/Onboarding";
 import InviteAccept from "@/pages/InviteAccept";
 import PlatformWorkspaces from "@/pages/platform/PlatformWorkspaces";
 import PlatformUsers from "@/pages/platform/PlatformUsers";
+import VisaoGeral from "@/pages/VisaoGeral";
+import Integracoes from "@/pages/Integracoes";
 
 const allRoutes = [...topLevelLinks, ...navGroups.flatMap((group) => group.children)];
+
+const customPages: Record<string, ComponentType> = {
+  dashboard: VisaoGeral,
+  "settings/integracoes": Integracoes,
+};
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -43,13 +51,16 @@ function App() {
                 <Route element={<ProtectedRoute />}>
                   <Route element={<AppLayout />}>
                     <Route index element={<Navigate to="/dashboard" replace />} />
-                    {allRoutes.map((route) => (
-                      <Route
-                        key={route.id}
-                        path={route.id}
-                        element={<PlaceholderPage title={route.label} />}
-                      />
-                    ))}
+                    {allRoutes.map((route) => {
+                      const CustomPage = customPages[route.id];
+                      return (
+                        <Route
+                          key={route.id}
+                          path={route.id}
+                          element={CustomPage ? <CustomPage /> : <PlaceholderPage title={route.label} />}
+                        />
+                      );
+                    })}
                   </Route>
                 </Route>
 
