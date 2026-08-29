@@ -39,6 +39,101 @@ export default function Integracoes() {
   const [diagnostics, setDiagnostics] = useState<Record<string, { ok: boolean; totalCount?: number | null; status?: number; error?: string }> | null>(null);
   const [diagnosing, setDiagnosing] = useState(false);
 
+  const [hublaIntegration, setHublaIntegration] = useState<IntegrationRow | null>(null);
+  const [hublaToken, setHublaToken] = useState("");
+  const [hublaSaving, setHublaSaving] = useState(false);
+  const [hublaFeedback, setHublaFeedback] = useState<{ type: "error" | "success"; text: string } | null>(null);
+
+  const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/hubla-webhook`;
+
+  const loadHublaIntegration = async () => {
+    if (!workspace) return;
+    const { data } = await supabase
+      .from("integrations")
+      .select("id, status, last_synced_at, last_error, config")
+      .eq("workspace_id", workspace.id)
+      .eq("provider", "hubla")
+      .maybeSingle();
+    setHublaIntegration(data as IntegrationRow | null);
+  };
+
+  useEffect(() => {
+    loadHublaIntegration();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace?.id]);
+
+  const handleSaveHublaToken = async () => {
+    if (!workspace) return;
+    if (!hublaToken.trim()) {
+      setHublaFeedback({ type: "error", text: "Cole o token do webhook da Hubla antes de salvar." });
+      return;
+    }
+
+    setHublaSaving(true);
+    setHublaFeedback(null);
+
+    const trimmedToken = hublaToken.trim();
+    const tokenPreview = trimmedToken.slice(-4);
+
+    const { data: existing } = await supabase
+      .from("integrations")
+      .select("id")
+      .eq("workspace_id", workspace.id)
+      .eq("provider", "hubla")
+      .maybeSingle();
+
+    let integrationId = existing?.id as string | undefined;
+
+    if (integrationId) {
+      const { error: updateError } = await supabase
+        .from("integrations")
+        .update({ config: { key_preview: tokenPreview } })
+        .eq("id", integrationId);
+      if (updateError) {
+        setHublaSaving(false);
+        setHublaFeedback({ type: "error", text: updateError.message });
+        return;
+      }
+    } else {
+      integrationId = crypto.randomUUID();
+      const { error: insertError } = await supabase.from("integrations").insert({
+        id: integrationId,
+        workspace_id: workspace.id,
+        provider: "hubla",
+        config: { key_preview: tokenPreview },
+      });
+      if (insertError) {
+        setHublaSaving(false);
+        setHublaFeedback({ type: "error", text: insertError.message });
+        return;
+      }
+    }
+
+    const { error: updateSecretError } = await supabase
+      .from("integration_secrets")
+      .update({ api_key: trimmedToken })
+      .eq("integration_id", integrationId);
+    if (updateSecretError) {
+      setHublaSaving(false);
+      setHublaFeedback({ type: "error", text: updateSecretError.message });
+      return;
+    }
+
+    const { error: insertSecretError } = await supabase
+      .from("integration_secrets")
+      .insert({ integration_id: integrationId, api_key: trimmedToken });
+    if (insertSecretError && insertSecretError.code !== "23505") {
+      setHublaSaving(false);
+      setHublaFeedback({ type: "error", text: insertSecretError.message });
+      return;
+    }
+
+    setHublaToken("");
+    setHublaSaving(false);
+    setHublaFeedback({ type: "success", text: "Token salvo. Assim que a Hubla enviar a primeira venda, o status muda pra Conectado." });
+    await loadHublaIntegration();
+  };
+
   const loadIntegration = async () => {
     if (!workspace) return;
     const { data } = await supabase
@@ -311,6 +406,57 @@ export default function Integracoes() {
               </table>
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="mt-6 max-w-md rounded-lg border border-border bg-card p-5">
+        <div className="flex items-center justify-between">
+          <h2 className="font-medium">Hubla</h2>
+          {hublaIntegration && (
+            <Badge variant={statusVariant[hublaIntegration.status]}>{statusLabel[hublaIntegration.status]}</Badge>
+          )}
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Vendas via webhook — a Hubla envia pra gente, não o contrário.
+        </p>
+
+        <div className="mt-4 flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="hubla-webhook-url">URL do webhook (cole no painel da Hubla)</Label>
+            <Input id="hubla-webhook-url" readOnly value={webhookUrl} onFocus={(e) => e.target.select()} />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="hubla-token">Token do webhook</Label>
+            <Input
+              id="hubla-token"
+              type="password"
+              placeholder={hublaIntegration ? "Cole um novo token pra trocar o atual" : "Cole o token gerado no painel da Hubla"}
+              value={hublaToken}
+              onChange={(e) => setHublaToken(e.target.value)}
+            />
+            {hublaIntegration?.config.key_preview && (
+              <p className="text-xs text-muted-foreground">
+                Token salvo: •••• {hublaIntegration.config.key_preview}
+              </p>
+            )}
+          </div>
+
+          {hublaFeedback && (
+            <p className={hublaFeedback.type === "error" ? "text-sm text-destructive" : "text-sm text-primary"}>
+              {hublaFeedback.text}
+            </p>
+          )}
+
+          {hublaIntegration?.last_synced_at && (
+            <p className="text-xs text-muted-foreground">
+              Última venda recebida: {new Date(hublaIntegration.last_synced_at).toLocaleString("pt-BR")}
+            </p>
+          )}
+
+          <Button onClick={handleSaveHublaToken} disabled={hublaSaving}>
+            {hublaIntegration ? "Salvar token" : "Conectar"}
+          </Button>
         </div>
       </div>
     </div>
