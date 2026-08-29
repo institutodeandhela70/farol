@@ -36,6 +36,8 @@ export default function Integracoes() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "error" | "success"; text: string } | null>(null);
+  const [diagnostics, setDiagnostics] = useState<Record<string, { ok: boolean; totalCount?: number | null; status?: number; error?: string }> | null>(null);
+  const [diagnosing, setDiagnosing] = useState(false);
 
   const loadIntegration = async () => {
     if (!workspace) return;
@@ -176,6 +178,36 @@ export default function Integracoes() {
     await loadIntegration();
   };
 
+  const handleDiagnose = async () => {
+    if (!integration) return;
+    setDiagnosing(true);
+    setDiagnostics(null);
+
+    const { data, error } = await supabase.functions.invoke("diagnose-asaas", {
+      body: { integration_id: integration.id },
+    });
+
+    setDiagnosing(false);
+
+    if (error || !data?.results) {
+      setFeedback({ type: "error", text: "Falha ao rodar o diagnóstico." });
+      return;
+    }
+
+    setDiagnostics(data.results);
+  };
+
+  const RESOURCE_LABEL: Record<string, string> = {
+    customers: "Clientes",
+    payments: "Cobranças",
+    subscriptions: "Assinaturas",
+    installments: "Parcelamentos",
+    transfers: "Transferências",
+    anticipations: "Antecipações",
+    pixAddressKeys: "Chaves Pix",
+    financeBalance: "Saldo da conta",
+  };
+
   if (loading) {
     return <div className="p-6 text-sm text-muted-foreground">Carregando...</div>;
   }
@@ -246,6 +278,39 @@ export default function Integracoes() {
               </Button>
             )}
           </div>
+
+          {integration && (
+            <Button variant="outline" onClick={handleDiagnose} disabled={diagnosing}>
+              {diagnosing ? "Consultando..." : "Ver o que a conta Asaas tem de dados"}
+            </Button>
+          )}
+
+          {diagnostics && (
+            <div className="mt-2 overflow-hidden rounded-lg border border-border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-left text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">Recurso</th>
+                    <th className="px-3 py-2 font-medium">Tem dado?</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(diagnostics).map(([key, value]) => (
+                    <tr key={key} className="border-t border-border">
+                      <td className="px-3 py-2">{RESOURCE_LABEL[key] ?? key}</td>
+                      <td className="px-3 py-2">
+                        {!value.ok
+                          ? `Erro (${value.status ?? "?"})`
+                          : value.totalCount != null
+                            ? `${value.totalCount} registro(s)`
+                            : "Sim"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>
