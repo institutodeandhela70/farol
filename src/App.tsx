@@ -19,6 +19,8 @@ import VisaoGeral from "@/pages/VisaoGeral";
 import Integracoes from "@/pages/Integracoes";
 import AsaasDashboard from "@/pages/AsaasDashboard";
 import HublaDashboard from "@/pages/HublaDashboard";
+import HubspotContacts from "@/pages/HubspotContacts";
+import HubspotDeals from "@/pages/HubspotDeals";
 
 const allRoutes = [...topLevelLinks, ...navGroups.flatMap((group) => group.children)];
 
@@ -27,6 +29,8 @@ const customPages: Record<string, ComponentType> = {
   "settings/integracoes": Integracoes,
   "dashboards/asaas": AsaasDashboard,
   "dashboards/hubla": HublaDashboard,
+  "dashboards/hubspot-contatos": HubspotContacts,
+  "dashboards/hubspot-negocios": HubspotDeals,
 };
 
 const queryClient = new QueryClient({

@@ -1,4 +1,6 @@
 import {
+  Briefcase,
+  Contact,
   CreditCard,
   FileSpreadsheet,
   GraduationCap,
@@ -36,6 +38,8 @@ export const navGroups: NavGroup[] = [
     children: [
       { id: "dashboards/hubla", label: "Hubla", icon: ShoppingBag },
       { id: "dashboards/asaas", label: "Asaas", icon: CreditCard },
+      { id: "dashboards/hubspot-negocios", label: "HubSpot Negócios", icon: Briefcase },
+      { id: "dashboards/hubspot-contatos", label: "HubSpot Contatos", icon: Contact },
       { id: "dashboards/hotmart", label: "Hotmart", icon: GraduationCap },
       { id: "dashboards/tmb", label: "TMB", icon: TrendingUp },
       { id: "dashboards/planilhas", label: "Planilhas", icon: FileSpreadsheet },
