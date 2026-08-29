@@ -123,6 +123,24 @@ Deno.serve(async (req) => {
       }),
     );
 
+    // Guarda uma versão enxuta (sem amostra completa dos registros) pra
+    // reaparecer ao reabrir a tela, sem precisar rodar de novo.
+    const slimResults: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(results)) {
+      const v = value as { ok: boolean; totalCount?: unknown; status?: number; error?: string };
+      slimResults[key] = { ok: v.ok, totalCount: v.totalCount ?? null, status: v.status, error: v.error };
+    }
+    await admin
+      .from("integrations")
+      .update({
+        config: {
+          ...integration.config,
+          last_diagnostics: slimResults,
+          last_diagnostics_at: new Date().toISOString(),
+        },
+      })
+      .eq("id", integration_id);
+
     return json({ environment, results });
   } catch (err) {
     return json({ error: String(err) }, 500);

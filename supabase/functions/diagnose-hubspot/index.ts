@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
 
     const { data: integration, error: integrationError } = await admin
       .from("integrations")
-      .select("id, workspace_id")
+      .select("id, workspace_id, config")
       .eq("id", integration_id)
       .single();
     if (integrationError || !integration) return json({ error: "integration not found" }, 404);
@@ -101,16 +101,17 @@ Deno.serve(async (req) => {
 
     await admin
       .from("integrations")
-      .update(
-        anySuccess
+      .update({
+        ...(anySuccess
           ? { status: "connected", last_synced_at: new Date().toISOString(), last_error: null }
           : {
               status: "error",
               last_error: firstError
                 ? `HTTP ${firstError.status ?? "?"}: ${firstError.error ?? "erro desconhecido"}`
                 : "Nenhum recurso respondeu.",
-            },
-      )
+            }),
+        config: { ...integration.config, last_diagnostics: results, last_diagnostics_at: new Date().toISOString() },
+      })
       .eq("id", integration_id);
 
     return json({ results });

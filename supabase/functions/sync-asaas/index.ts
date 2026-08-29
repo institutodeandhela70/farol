@@ -45,15 +45,45 @@ Deno.serve(async (req) => {
     integrationId = body?.integration_id;
     if (!integrationId) return json({ error: "integration_id required" }, 400);
 
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
+    // service_role_key não é confiável pra essa checagem (o gateway já não aceita
+    // o formato novo, e o valor exposto em runtime pode divergir do JWT legado).
+    // Segredo interno próprio, guardado como Edge Function Secret + no Vault.
+    const internalToken = Deno.env.get("FAROL_INTERNAL_TOKEN");
+    const isTrustedInternalCall = !!internalToken && authHeader.replace(/^Bearer\s+/i, "") === internalToken;
 
-    const { data: userData, error: userError } = await userClient.auth.getUser();
-    if (userError || !userData.user) {
-      await markError(`Sessão inválida ao sincronizar: ${userError?.message ?? "sem usuário"}`);
-      return json({ error: "invalid session" }, 401);
+    if (!isTrustedInternalCall) {
+      // Chamada de usuário (clique manual) — confere sessão + participação no workspace.
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+
+      const { data: userData, error: userError } = await userClient.auth.getUser();
+      if (userError || !userData.user) {
+        await markError(`Sessão inválida ao sincronizar: ${userError?.message ?? "sem usuário"}`);
+        return json({ error: "invalid session" }, 401);
+      }
+
+      const { data: integrationCheck } = await admin
+        .from("integrations")
+        .select("workspace_id")
+        .eq("id", integrationId)
+        .maybeSingle();
+      if (!integrationCheck) return json({ error: "integration not found" }, 404);
+
+      const { data: membership } = await admin
+        .from("workspace_members")
+        .select("id")
+        .eq("workspace_id", integrationCheck.workspace_id)
+        .eq("user_id", userData.user.id)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (!membership) {
+        await markError("Usuário não é membro ativo do workspace desta integração.");
+        return json({ error: "forbidden" }, 403);
+      }
     }
+    // Chamada interna (cron via pg_net, autenticada com a service role key) já é
+    // confiável por natureza, não precisa checar membership de usuário.
 
     const { data: integration, error: integrationError } = await admin
       .from("integrations")
@@ -62,18 +92,6 @@ Deno.serve(async (req) => {
       .single();
     if (integrationError || !integration) {
       return json({ error: "integration not found" }, 404);
-    }
-
-    const { data: membership } = await admin
-      .from("workspace_members")
-      .select("id")
-      .eq("workspace_id", integration.workspace_id)
-      .eq("user_id", userData.user.id)
-      .eq("is_active", true)
-      .maybeSingle();
-    if (!membership) {
-      await markError("Usuário não é membro ativo do workspace desta integração.");
-      return json({ error: "forbidden" }, 403);
     }
 
     const { data: secret, error: secretError } = await admin

@@ -406,3 +406,12 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 # Supabase) — autenticação própria dentro da função, não via JWT.
 [functions.hubla-webhook]
 verify_jwt = false
+
+# Funções de sincronização também precisam ser chamáveis pelo cron interno
+# (sem JWT de usuário) — autenticação própria dentro da função (JWT de usuário
+# OU o segredo interno FAROL_INTERNAL_TOKEN).
+[functions.sync-asaas]
+verify_jwt = false
+
+[functions.sync-hubspot]
+verify_jwt = false

@@ -16,7 +16,13 @@ interface IntegrationRow {
   status: IntegrationStatus;
   last_synced_at: string | null;
   last_error: string | null;
-  config: { environment?: "sandbox" | "production"; key_preview?: string };
+  sync_enabled: boolean;
+  config: {
+    environment?: "sandbox" | "production";
+    key_preview?: string;
+    last_diagnostics?: Diagnostics;
+    last_diagnostics_at?: string;
+  };
 }
 
 type DiagnosticEntry = { ok: boolean; total?: number | null; totalCount?: number | null; status?: number; error?: string };
@@ -130,13 +136,14 @@ export default function Integracoes() {
     if (!workspace) return;
     const { data } = await supabase
       .from("integrations")
-      .select("id, status, last_synced_at, last_error, config")
+      .select("id, status, last_synced_at, last_error, sync_enabled, config")
       .eq("workspace_id", workspace.id)
       .eq("provider", "asaas")
       .maybeSingle();
 
     setIntegration(data as IntegrationRow | null);
     setEnvironment((data?.config?.environment as "sandbox" | "production") ?? "sandbox");
+    setDiagnostics((data?.config?.last_diagnostics as Diagnostics) ?? null);
     setLoading(false);
   };
 
@@ -238,7 +245,7 @@ export default function Integracoes() {
     if (!workspace) return;
     const { data } = await supabase
       .from("integrations")
-      .select("id, status, last_synced_at, last_error, config")
+      .select("id, status, last_synced_at, last_error, sync_enabled, config")
       .eq("workspace_id", workspace.id)
       .eq("provider", "hubla")
       .maybeSingle();
@@ -295,11 +302,12 @@ export default function Integracoes() {
     if (!workspace) return;
     const { data } = await supabase
       .from("integrations")
-      .select("id, status, last_synced_at, last_error, config")
+      .select("id, status, last_synced_at, last_error, sync_enabled, config")
       .eq("workspace_id", workspace.id)
       .eq("provider", "hubspot")
       .maybeSingle();
     setHubspotIntegration(data as IntegrationRow | null);
+    setHubspotDiagnostics((data?.config?.last_diagnostics as Diagnostics) ?? null);
   };
 
   useEffect(() => {
@@ -356,6 +364,11 @@ export default function Integracoes() {
 
     setHubspotDiagnostics(data.results);
     await loadHubspotIntegration();
+  };
+
+  const handleToggleSync = async (integrationId: string, current: boolean, reload: () => Promise<void>) => {
+    await supabase.from("integrations").update({ sync_enabled: !current }).eq("id", integrationId);
+    await reload();
   };
 
   if (loading) {
@@ -445,11 +458,25 @@ export default function Integracoes() {
       <Dialog open={openDialog === "asaas"} onOpenChange={(o) => setOpenDialog(o ? "asaas" : null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Asaas</DialogTitle>
+            <div className="flex items-center gap-2">
+              <DialogTitle>Asaas</DialogTitle>
+              {integration && <Badge variant={statusVariant[integration.status]}>{statusLabel[integration.status]}</Badge>}
+            </div>
             <DialogDescription>Cobranças e pagamentos.</DialogDescription>
           </DialogHeader>
 
           <div className="flex flex-col gap-3">
+            {integration && (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={integration.sync_enabled}
+                  onChange={() => handleToggleSync(integration.id, integration.sync_enabled, loadIntegration)}
+                />
+                Sincronização automática diária ativada
+              </label>
+            )}
+
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="asaas-env">Ambiente</Label>
               <select
@@ -515,7 +542,12 @@ export default function Integracoes() {
       <Dialog open={openDialog === "hubla"} onOpenChange={(o) => setOpenDialog(o ? "hubla" : null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Hubla</DialogTitle>
+            <div className="flex items-center gap-2">
+              <DialogTitle>Hubla</DialogTitle>
+              {hublaIntegration && (
+                <Badge variant={statusVariant[hublaIntegration.status]}>{statusLabel[hublaIntegration.status]}</Badge>
+              )}
+            </div>
             <DialogDescription>Vendas via webhook — a Hubla envia pra gente, não o contrário.</DialogDescription>
           </DialogHeader>
 
@@ -564,11 +596,29 @@ export default function Integracoes() {
       <Dialog open={openDialog === "hubspot"} onOpenChange={(o) => setOpenDialog(o ? "hubspot" : null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>HubSpot</DialogTitle>
+            <div className="flex items-center gap-2">
+              <DialogTitle>HubSpot</DialogTitle>
+              {hubspotIntegration && (
+                <Badge variant={statusVariant[hubspotIntegration.status]}>{statusLabel[hubspotIntegration.status]}</Badge>
+              )}
+            </div>
             <DialogDescription>CRM — contatos, empresas, negócios, tickets.</DialogDescription>
           </DialogHeader>
 
           <div className="flex flex-col gap-3">
+            {hubspotIntegration && (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={hubspotIntegration.sync_enabled}
+                  onChange={() =>
+                    handleToggleSync(hubspotIntegration.id, hubspotIntegration.sync_enabled, loadHubspotIntegration)
+                  }
+                />
+                Sincronização automática diária ativada
+              </label>
+            )}
+
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="hubspot-token">Access token do app privado</Label>
               <Input
