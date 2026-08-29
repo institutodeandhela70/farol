@@ -94,6 +94,25 @@ Deno.serve(async (req) => {
       }),
     );
 
+    const anySuccess = Object.values(results).some((r) => (r as { ok: boolean }).ok);
+    const firstError = Object.values(results).find((r) => !(r as { ok: boolean }).ok) as
+      | { status?: number; error?: string }
+      | undefined;
+
+    await admin
+      .from("integrations")
+      .update(
+        anySuccess
+          ? { status: "connected", last_synced_at: new Date().toISOString(), last_error: null }
+          : {
+              status: "error",
+              last_error: firstError
+                ? `HTTP ${firstError.status ?? "?"}: ${firstError.error ?? "erro desconhecido"}`
+                : "Nenhum recurso respondeu.",
+            },
+      )
+      .eq("id", integration_id);
+
     return json({ results });
   } catch (err) {
     return json({ error: String(err) }, 500);
