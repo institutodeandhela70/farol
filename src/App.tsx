@@ -17,12 +17,14 @@ import PlatformWorkspaces from "@/pages/platform/PlatformWorkspaces";
 import PlatformUsers from "@/pages/platform/PlatformUsers";
 import VisaoGeral from "@/pages/VisaoGeral";
 import Integracoes from "@/pages/Integracoes";
+import AsaasDashboard from "@/pages/AsaasDashboard";
 
 const allRoutes = [...topLevelLinks, ...navGroups.flatMap((group) => group.children)];
 
 const customPages: Record<string, ComponentType> = {
   dashboard: VisaoGeral,
   "settings/integracoes": Integracoes,
+  "dashboards/asaas": AsaasDashboard,
 };
 
 const queryClient = new QueryClient({

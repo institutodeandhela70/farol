@@ -110,10 +110,37 @@ Deno.serve(async (req) => {
     }
 
     const asaasData = await asaasRes.json();
-    const charges = (asaasData.data ?? []).map((c: Record<string, unknown>) => ({
+    const payments = (asaasData.data ?? []) as Record<string, unknown>[];
+
+    const asaasHeaders = {
+      access_token: secret.api_key,
+      "User-Agent": "FarolID",
+      "Content-Type": "application/json",
+    };
+
+    // O payload de /payments só traz o id do cliente, não o nome — busca cada
+    // cliente único para exibir/pesquisar por nome de verdade no dashboard.
+    const customerIds = Array.from(
+      new Set(payments.map((p) => p.customer).filter((id): id is string => typeof id === "string")),
+    );
+    const customerNames = new Map<string, string>();
+    await Promise.all(
+      customerIds.map(async (customerId) => {
+        try {
+          const res = await fetch(`${baseUrl}/customers/${customerId}`, { headers: asaasHeaders });
+          if (!res.ok) return;
+          const customer = await res.json();
+          if (customer?.name) customerNames.set(customerId, customer.name);
+        } catch {
+          // Sem nome, cai no fallback abaixo (mostra o id do cliente).
+        }
+      }),
+    );
+
+    const charges = payments.map((c) => ({
       workspace_id: integration.workspace_id,
       external_id: c.id,
-      customer_name: c.customer ?? null,
+      customer_name: (typeof c.customer === "string" && customerNames.get(c.customer)) || c.customer || null,
       value: c.value ?? 0,
       status: c.status ?? "UNKNOWN",
       due_date: c.dueDate ?? null,
