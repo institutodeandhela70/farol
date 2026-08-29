@@ -18,6 +18,7 @@ import PlatformUsers from "@/pages/platform/PlatformUsers";
 import VisaoGeral from "@/pages/VisaoGeral";
 import Integracoes from "@/pages/Integracoes";
 import AsaasDashboard from "@/pages/AsaasDashboard";
+import HublaDashboard from "@/pages/HublaDashboard";
 
 const allRoutes = [...topLevelLinks, ...navGroups.flatMap((group) => group.children)];
 
@@ -25,6 +26,7 @@ const customPages: Record<string, ComponentType> = {
   dashboard: VisaoGeral,
   "settings/integracoes": Integracoes,
   "dashboards/asaas": AsaasDashboard,
+  "dashboards/hubla": HublaDashboard,
 };
 
 const queryClient = new QueryClient({
