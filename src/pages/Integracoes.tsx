@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { saveIntegrationCredential } from "@/lib/integrations";
 import { useWorkspace } from "@/hooks/WorkspaceProvider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +17,9 @@ interface IntegrationRow {
   config: { environment?: "sandbox" | "production"; key_preview?: string };
 }
 
+type DiagnosticEntry = { ok: boolean; total?: number | null; totalCount?: number | null; status?: number; error?: string };
+type Diagnostics = Record<string, DiagnosticEntry>;
+
 const statusLabel: Record<IntegrationStatus, string> = {
   disconnected: "Desconectado",
   connected: "Conectado",
@@ -28,111 +32,68 @@ const statusVariant: Record<IntegrationStatus, "secondary" | "default" | "destru
   error: "destructive",
 };
 
+const RESOURCE_LABEL: Record<string, string> = {
+  // Asaas
+  customers: "Clientes",
+  payments: "Cobranças",
+  subscriptions: "Assinaturas",
+  installments: "Parcelamentos",
+  transfers: "Transferências",
+  anticipations: "Antecipações",
+  pixAddressKeys: "Chaves Pix",
+  financeBalance: "Saldo da conta",
+  // HubSpot
+  contacts: "Contatos",
+  companies: "Empresas",
+  deals: "Negócios",
+  tickets: "Tickets",
+  calls: "Chamadas",
+  emails: "E-mails",
+  meetings: "Reuniões",
+  tasks: "Tarefas",
+  notes: "Notas",
+};
+
+function DiagnosticsTable({ diagnostics }: { diagnostics: Diagnostics }) {
+  return (
+    <div className="mt-2 overflow-hidden rounded-lg border border-border">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/50 text-left text-muted-foreground">
+          <tr>
+            <th className="px-3 py-2 font-medium">Recurso</th>
+            <th className="px-3 py-2 font-medium">Tem dado?</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(diagnostics).map(([key, value]) => {
+            const count = value.total ?? value.totalCount;
+            return (
+              <tr key={key} className="border-t border-border">
+                <td className="px-3 py-2">{RESOURCE_LABEL[key] ?? key}</td>
+                <td className="px-3 py-2">
+                  {!value.ok ? `Erro (${value.status ?? "?"})` : count != null ? `${count} registro(s)` : "Sim"}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function Integracoes() {
   const { workspace } = useWorkspace();
+  const [loading, setLoading] = useState(true);
+
+  // --- Asaas ---
   const [integration, setIntegration] = useState<IntegrationRow | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [environment, setEnvironment] = useState<"sandbox" | "production">("sandbox");
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "error" | "success"; text: string } | null>(null);
-  const [diagnostics, setDiagnostics] = useState<Record<string, { ok: boolean; totalCount?: number | null; status?: number; error?: string }> | null>(null);
+  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
   const [diagnosing, setDiagnosing] = useState(false);
-
-  const [hublaIntegration, setHublaIntegration] = useState<IntegrationRow | null>(null);
-  const [hublaToken, setHublaToken] = useState("");
-  const [hublaSaving, setHublaSaving] = useState(false);
-  const [hublaFeedback, setHublaFeedback] = useState<{ type: "error" | "success"; text: string } | null>(null);
-
-  const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/hubla-webhook`;
-
-  const loadHublaIntegration = async () => {
-    if (!workspace) return;
-    const { data } = await supabase
-      .from("integrations")
-      .select("id, status, last_synced_at, last_error, config")
-      .eq("workspace_id", workspace.id)
-      .eq("provider", "hubla")
-      .maybeSingle();
-    setHublaIntegration(data as IntegrationRow | null);
-  };
-
-  useEffect(() => {
-    loadHublaIntegration();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace?.id]);
-
-  const handleSaveHublaToken = async () => {
-    if (!workspace) return;
-    if (!hublaToken.trim()) {
-      setHublaFeedback({ type: "error", text: "Cole o token do webhook da Hubla antes de salvar." });
-      return;
-    }
-
-    setHublaSaving(true);
-    setHublaFeedback(null);
-
-    const trimmedToken = hublaToken.trim();
-    const tokenPreview = trimmedToken.slice(-4);
-
-    const { data: existing } = await supabase
-      .from("integrations")
-      .select("id")
-      .eq("workspace_id", workspace.id)
-      .eq("provider", "hubla")
-      .maybeSingle();
-
-    let integrationId = existing?.id as string | undefined;
-
-    if (integrationId) {
-      const { error: updateError } = await supabase
-        .from("integrations")
-        .update({ config: { key_preview: tokenPreview } })
-        .eq("id", integrationId);
-      if (updateError) {
-        setHublaSaving(false);
-        setHublaFeedback({ type: "error", text: updateError.message });
-        return;
-      }
-    } else {
-      integrationId = crypto.randomUUID();
-      const { error: insertError } = await supabase.from("integrations").insert({
-        id: integrationId,
-        workspace_id: workspace.id,
-        provider: "hubla",
-        config: { key_preview: tokenPreview },
-      });
-      if (insertError) {
-        setHublaSaving(false);
-        setHublaFeedback({ type: "error", text: insertError.message });
-        return;
-      }
-    }
-
-    const { error: updateSecretError } = await supabase
-      .from("integration_secrets")
-      .update({ api_key: trimmedToken })
-      .eq("integration_id", integrationId);
-    if (updateSecretError) {
-      setHublaSaving(false);
-      setHublaFeedback({ type: "error", text: updateSecretError.message });
-      return;
-    }
-
-    const { error: insertSecretError } = await supabase
-      .from("integration_secrets")
-      .insert({ integration_id: integrationId, api_key: trimmedToken });
-    if (insertSecretError && insertSecretError.code !== "23505") {
-      setHublaSaving(false);
-      setHublaFeedback({ type: "error", text: insertSecretError.message });
-      return;
-    }
-
-    setHublaToken("");
-    setHublaSaving(false);
-    setHublaFeedback({ type: "success", text: "Token salvo. Assim que a Hubla enviar a primeira venda, o status muda pra Conectado." });
-    await loadHublaIntegration();
-  };
 
   const loadIntegration = async () => {
     if (!workspace) return;
@@ -164,71 +125,16 @@ export default function Integracoes() {
     setFeedback(null);
 
     const trimmedKey = apiKey.trim();
-    const keyPreview = trimmedKey.slice(-4);
+    const { integrationId, error } = await saveIntegrationCredential({
+      workspaceId: workspace.id,
+      provider: "asaas",
+      config: { environment, key_preview: trimmedKey.slice(-4) },
+      secretValue: trimmedKey,
+    });
 
-    // Nunca fazer upsert incluindo `id` contra um conflict target diferente da PK:
-    // se já existir linha para (workspace_id, provider), isso tenta trocar o id dela,
-    // o que quebra a FK de integration_secrets assim que um segredo já foi salvo.
-    // Por isso: primeiro tenta achar a linha existente, só gera id novo se não achar.
-    const { data: existing } = await supabase
-      .from("integrations")
-      .select("id")
-      .eq("workspace_id", workspace.id)
-      .eq("provider", "asaas")
-      .maybeSingle();
-
-    let integrationId = existing?.id as string | undefined;
-
-    if (integrationId) {
-      const { error: updateError } = await supabase
-        .from("integrations")
-        .update({ config: { environment, key_preview: keyPreview } })
-        .eq("id", integrationId);
-
-      if (updateError) {
-        setSaving(false);
-        setFeedback({ type: "error", text: updateError.message });
-        return;
-      }
-    } else {
-      integrationId = crypto.randomUUID();
-      const { error: insertError } = await supabase.from("integrations").insert({
-        id: integrationId,
-        workspace_id: workspace.id,
-        provider: "asaas",
-        config: { environment, key_preview: keyPreview },
-      });
-
-      if (insertError) {
-        setSaving(false);
-        setFeedback({ type: "error", text: insertError.message });
-        return;
-      }
-    }
-
-    // integration_secrets não tem policy de SELECT (de propósito — só a Edge Function lê).
-    // upsert() sempre pede RETURNING nesse client/setup, o que quebra por RLS numa tabela
-    // sem SELECT. Por isso: UPDATE simples primeiro (sem-op se a linha não existir) e um
-    // INSERT simples depois — se a linha já existia, o INSERT esbarra em conflito de chave
-    // (23505), o que é esperado (o UPDATE já cuidou dela) e é ignorado.
-    const { error: updateSecretError } = await supabase
-      .from("integration_secrets")
-      .update({ api_key: trimmedKey })
-      .eq("integration_id", integrationId);
-
-    if (updateSecretError) {
+    if (error || !integrationId) {
       setSaving(false);
-      setFeedback({ type: "error", text: updateSecretError.message });
-      return;
-    }
-
-    const { error: insertSecretError } = await supabase
-      .from("integration_secrets")
-      .insert({ integration_id: integrationId, api_key: trimmedKey });
-
-    if (insertSecretError && insertSecretError.code !== "23505") {
-      setSaving(false);
-      setFeedback({ type: "error", text: insertSecretError.message });
+      setFeedback({ type: "error", text: error ?? "Falha ao salvar." });
       return;
     }
 
@@ -292,15 +198,134 @@ export default function Integracoes() {
     setDiagnostics(data.results);
   };
 
-  const RESOURCE_LABEL: Record<string, string> = {
-    customers: "Clientes",
-    payments: "Cobranças",
-    subscriptions: "Assinaturas",
-    installments: "Parcelamentos",
-    transfers: "Transferências",
-    anticipations: "Antecipações",
-    pixAddressKeys: "Chaves Pix",
-    financeBalance: "Saldo da conta",
+  // --- Hubla ---
+  const [hublaIntegration, setHublaIntegration] = useState<IntegrationRow | null>(null);
+  const [hublaToken, setHublaToken] = useState("");
+  const [hublaSaving, setHublaSaving] = useState(false);
+  const [hublaFeedback, setHublaFeedback] = useState<{ type: "error" | "success"; text: string } | null>(null);
+
+  const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/hubla-webhook`;
+
+  const loadHublaIntegration = async () => {
+    if (!workspace) return;
+    const { data } = await supabase
+      .from("integrations")
+      .select("id, status, last_synced_at, last_error, config")
+      .eq("workspace_id", workspace.id)
+      .eq("provider", "hubla")
+      .maybeSingle();
+    setHublaIntegration(data as IntegrationRow | null);
+  };
+
+  useEffect(() => {
+    loadHublaIntegration();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace?.id]);
+
+  const handleSaveHublaToken = async () => {
+    if (!workspace) return;
+    if (!hublaToken.trim()) {
+      setHublaFeedback({ type: "error", text: "Cole o token do webhook da Hubla antes de salvar." });
+      return;
+    }
+
+    setHublaSaving(true);
+    setHublaFeedback(null);
+
+    const trimmedToken = hublaToken.trim();
+    const { error } = await saveIntegrationCredential({
+      workspaceId: workspace.id,
+      provider: "hubla",
+      config: { key_preview: trimmedToken.slice(-4) },
+      secretValue: trimmedToken,
+    });
+
+    setHublaSaving(false);
+
+    if (error) {
+      setHublaFeedback({ type: "error", text: error });
+      return;
+    }
+
+    setHublaToken("");
+    setHublaFeedback({
+      type: "success",
+      text: "Token salvo. Assim que a Hubla enviar a primeira venda, o status muda pra Conectado.",
+    });
+    await loadHublaIntegration();
+  };
+
+  // --- HubSpot ---
+  const [hubspotIntegration, setHubspotIntegration] = useState<IntegrationRow | null>(null);
+  const [hubspotToken, setHubspotToken] = useState("");
+  const [hubspotSaving, setHubspotSaving] = useState(false);
+  const [hubspotFeedback, setHubspotFeedback] = useState<{ type: "error" | "success"; text: string } | null>(null);
+  const [hubspotDiagnostics, setHubspotDiagnostics] = useState<Diagnostics | null>(null);
+  const [hubspotDiagnosing, setHubspotDiagnosing] = useState(false);
+
+  const loadHubspotIntegration = async () => {
+    if (!workspace) return;
+    const { data } = await supabase
+      .from("integrations")
+      .select("id, status, last_synced_at, last_error, config")
+      .eq("workspace_id", workspace.id)
+      .eq("provider", "hubspot")
+      .maybeSingle();
+    setHubspotIntegration(data as IntegrationRow | null);
+  };
+
+  useEffect(() => {
+    loadHubspotIntegration();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace?.id]);
+
+  const handleSaveHubspotToken = async () => {
+    if (!workspace) return;
+    if (!hubspotToken.trim()) {
+      setHubspotFeedback({ type: "error", text: "Cole o access token do app privado da HubSpot antes de salvar." });
+      return;
+    }
+
+    setHubspotSaving(true);
+    setHubspotFeedback(null);
+
+    const trimmedToken = hubspotToken.trim();
+    const { error } = await saveIntegrationCredential({
+      workspaceId: workspace.id,
+      provider: "hubspot",
+      config: { key_preview: trimmedToken.slice(-4) },
+      secretValue: trimmedToken,
+    });
+
+    setHubspotSaving(false);
+
+    if (error) {
+      setHubspotFeedback({ type: "error", text: error });
+      return;
+    }
+
+    setHubspotToken("");
+    setHubspotFeedback({ type: "success", text: "Token salvo." });
+    await loadHubspotIntegration();
+  };
+
+  const handleDiagnoseHubspot = async () => {
+    if (!hubspotIntegration) return;
+    setHubspotDiagnosing(true);
+    setHubspotDiagnostics(null);
+
+    const { data, error } = await supabase.functions.invoke("diagnose-hubspot", {
+      body: { integration_id: hubspotIntegration.id },
+    });
+
+    setHubspotDiagnosing(false);
+
+    if (error || !data?.results) {
+      setHubspotFeedback({ type: "error", text: "Falha ao rodar o diagnóstico." });
+      return;
+    }
+
+    setHubspotDiagnostics(data.results);
   };
 
   if (loading) {
@@ -380,32 +405,7 @@ export default function Integracoes() {
             </Button>
           )}
 
-          {diagnostics && (
-            <div className="mt-2 overflow-hidden rounded-lg border border-border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-left text-muted-foreground">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">Recurso</th>
-                    <th className="px-3 py-2 font-medium">Tem dado?</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(diagnostics).map(([key, value]) => (
-                    <tr key={key} className="border-t border-border">
-                      <td className="px-3 py-2">{RESOURCE_LABEL[key] ?? key}</td>
-                      <td className="px-3 py-2">
-                        {!value.ok
-                          ? `Erro (${value.status ?? "?"})`
-                          : value.totalCount != null
-                            ? `${value.totalCount} registro(s)`
-                            : "Sim"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {diagnostics && <DiagnosticsTable diagnostics={diagnostics} />}
         </div>
       </div>
 
@@ -457,6 +457,52 @@ export default function Integracoes() {
           <Button onClick={handleSaveHublaToken} disabled={hublaSaving}>
             {hublaIntegration ? "Salvar token" : "Conectar"}
           </Button>
+        </div>
+      </div>
+
+      <div className="mt-6 max-w-md rounded-lg border border-border bg-card p-5">
+        <div className="flex items-center justify-between">
+          <h2 className="font-medium">HubSpot</h2>
+          {hubspotIntegration && (
+            <Badge variant={statusVariant[hubspotIntegration.status]}>{statusLabel[hubspotIntegration.status]}</Badge>
+          )}
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">CRM — contatos, empresas, negócios, tickets.</p>
+
+        <div className="mt-4 flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="hubspot-token">Access token do app privado</Label>
+            <Input
+              id="hubspot-token"
+              type="password"
+              placeholder={hubspotIntegration ? "Cole um novo token pra trocar o atual" : "Cole o access token da HubSpot"}
+              value={hubspotToken}
+              onChange={(e) => setHubspotToken(e.target.value)}
+            />
+            {hubspotIntegration?.config.key_preview && (
+              <p className="text-xs text-muted-foreground">
+                Token salvo: •••• {hubspotIntegration.config.key_preview}
+              </p>
+            )}
+          </div>
+
+          {hubspotFeedback && (
+            <p className={hubspotFeedback.type === "error" ? "text-sm text-destructive" : "text-sm text-primary"}>
+              {hubspotFeedback.text}
+            </p>
+          )}
+
+          <Button onClick={handleSaveHubspotToken} disabled={hubspotSaving}>
+            {hubspotIntegration ? "Salvar token" : "Conectar"}
+          </Button>
+
+          {hubspotIntegration && (
+            <Button variant="outline" onClick={handleDiagnoseHubspot} disabled={hubspotDiagnosing}>
+              {hubspotDiagnosing ? "Consultando..." : "Ver o que a conta HubSpot tem de dados"}
+            </Button>
+          )}
+
+          {hubspotDiagnostics && <DiagnosticsTable diagnostics={hubspotDiagnostics} />}
         </div>
       </div>
     </div>
