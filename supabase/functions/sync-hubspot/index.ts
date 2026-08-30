@@ -62,11 +62,124 @@ function promotedColumns(type: ObjectType, props: Record<string, unknown>) {
   };
 }
 
-async function fetchAllPropertyNames(type: ObjectType, headers: Record<string, string>): Promise<string[]> {
-  const res = await fetch(`https://api.hubapi.com/crm/v3/properties/${type}`, { headers });
-  if (!res.ok) throw new Error(`failed to list properties for ${type}: HTTP ${res.status}`);
+interface PropertyGroup {
+  name: string;
+  label: string;
+  displayOrder: number;
+}
+
+interface PropertyDef {
+  name: string;
+  label: string;
+  groupName?: string;
+  displayOrder: number;
+  options?: { label: string; value: string }[];
+}
+
+async function fetchPropertyDefs(
+  type: ObjectType,
+  workspaceId: string,
+  headers: Record<string, string>,
+  admin: ReturnType<typeof createClient>,
+): Promise<string[]> {
+  const [propsRes, groupsRes] = await Promise.all([
+    fetch(`https://api.hubapi.com/crm/v3/properties/${type}`, { headers }),
+    fetch(`https://api.hubapi.com/crm/v3/properties/${type}/groups`, { headers }),
+  ]);
+  if (!propsRes.ok) throw new Error(`failed to list properties for ${type}: HTTP ${propsRes.status}`);
+  const propsBody = await propsRes.json();
+  const properties: PropertyDef[] = propsBody.results ?? [];
+
+  const groupsByName: Record<string, PropertyGroup> = {};
+  if (groupsRes.ok) {
+    const groupsBody = await groupsRes.json();
+    for (const g of (groupsBody.results ?? []) as PropertyGroup[]) groupsByName[g.name] = g;
+  }
+
+  const rows = properties.map((p) => {
+    const group = p.groupName ? groupsByName[p.groupName] : undefined;
+    return {
+      workspace_id: workspaceId,
+      object_type: type,
+      name: p.name,
+      label: p.label,
+      group_name: p.groupName ?? null,
+      group_label: group?.label ?? p.groupName ?? null,
+      group_display_order: group?.displayOrder ?? 0,
+      display_order: p.displayOrder ?? 0,
+      options: p.options ?? [],
+      updated_at: new Date().toISOString(),
+    };
+  });
+
+  if (rows.length > 0) {
+    await admin.from("hubspot_property_defs").upsert(rows, { onConflict: "workspace_id,object_type,name" });
+  }
+
+  return properties.map((p) => p.name);
+}
+
+async function syncPipelines(workspaceId: string, headers: Record<string, string>, admin: ReturnType<typeof createClient>) {
+  const res = await fetch("https://api.hubapi.com/crm/v3/pipelines/deals", { headers });
+  if (!res.ok) return;
   const body = await res.json();
-  return (body.results ?? []).map((p: { name: string }) => p.name);
+  const pipelines: { id: string; label: string; displayOrder: number; stages: { id: string; label: string; displayOrder: number }[] }[] =
+    body.results ?? [];
+
+  const pipelineRows = pipelines.map((p) => ({
+    workspace_id: workspaceId,
+    pipeline_id: p.id,
+    label: p.label,
+    display_order: p.displayOrder ?? 0,
+    updated_at: new Date().toISOString(),
+  }));
+  const stageRows = pipelines.flatMap((p) =>
+    (p.stages ?? []).map((s) => ({
+      workspace_id: workspaceId,
+      pipeline_id: p.id,
+      stage_id: s.id,
+      label: s.label,
+      display_order: s.displayOrder ?? 0,
+      updated_at: new Date().toISOString(),
+    })),
+  );
+
+  if (pipelineRows.length > 0) {
+    await admin.from("hubspot_pipelines").upsert(pipelineRows, { onConflict: "workspace_id,pipeline_id" });
+  }
+  if (stageRows.length > 0) {
+    await admin.from("hubspot_pipeline_stages").upsert(stageRows, { onConflict: "workspace_id,pipeline_id,stage_id" });
+  }
+}
+
+async function syncOwners(workspaceId: string, headers: Record<string, string>, admin: ReturnType<typeof createClient>) {
+  let after: string | null = null;
+  let firstPage = true;
+
+  while (firstPage || after) {
+    firstPage = false;
+    const params = new URLSearchParams({ limit: "100" });
+    if (after) params.set("after", after);
+
+    const res = await fetch(`https://api.hubapi.com/crm/v3/owners?${params.toString()}`, { headers });
+    if (!res.ok) return;
+    const body = await res.json();
+    const owners: { id: string; email?: string; firstName?: string; lastName?: string }[] = body.results ?? [];
+
+    const rows = owners.map((o) => ({
+      workspace_id: workspaceId,
+      owner_id: o.id,
+      email: o.email ?? null,
+      first_name: o.firstName ?? null,
+      last_name: o.lastName ?? null,
+      updated_at: new Date().toISOString(),
+    }));
+    if (rows.length > 0) {
+      await admin.from("hubspot_owners").upsert(rows, { onConflict: "workspace_id,owner_id" });
+    }
+
+    after = body.paging?.next?.after ?? null;
+  }
 }
 
 interface HubspotItem {
@@ -163,13 +276,22 @@ Deno.serve(async (req) => {
     let totalSynced = 0;
     let lastError: string | null = null;
 
+    // Metadados (pipelines/etapas, donos) — pequenos, sincroniza sempre por
+    // completo antes do loop principal, pra alimentar os nomes legíveis no frontend.
+    try {
+      await syncPipelines(integration.workspace_id, headers, admin);
+      await syncOwners(integration.workspace_id, headers, admin);
+    } catch (err) {
+      lastError = `Falha ao sincronizar metadados: ${String(err)}`;
+    }
+
     for (const type of OBJECT_TYPES) {
       if (Date.now() - start > TIME_BUDGET_MS) break;
 
       const state: TypeSyncState = syncState[type] ?? { cursor: null, backfilled: false, since: null };
       let properties: string[];
       try {
-        properties = await fetchAllPropertyNames(type, headers);
+        properties = await fetchPropertyDefs(type, integration.workspace_id, headers, admin);
       } catch (err) {
         lastError = String(err);
         continue;

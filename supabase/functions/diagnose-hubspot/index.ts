@@ -33,12 +33,12 @@ Deno.serve(async (req) => {
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
 
-    const { data: userData, error: userError } = await userClient.auth.getUser();
-    if (userError || !userData.user) return json({ error: "invalid session" }, 401);
+    // service_role_key não é confiável pra essa checagem — segredo interno próprio,
+    // mesmo padrão usado em sync-hubspot (Edge Function Secret + Vault).
+    const internalToken = Deno.env.get("FAROL_INTERNAL_TOKEN");
+    const bearer = authHeader.replace(/^Bearer\s+/i, "");
+    const isTrustedInternalCall = !!internalToken && bearer === internalToken;
 
     const { data: integration, error: integrationError } = await admin
       .from("integrations")
@@ -47,14 +47,22 @@ Deno.serve(async (req) => {
       .single();
     if (integrationError || !integration) return json({ error: "integration not found" }, 404);
 
-    const { data: membership } = await admin
-      .from("workspace_members")
-      .select("id")
-      .eq("workspace_id", integration.workspace_id)
-      .eq("user_id", userData.user.id)
-      .eq("is_active", true)
-      .maybeSingle();
-    if (!membership) return json({ error: "forbidden" }, 403);
+    if (!isTrustedInternalCall) {
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: userData, error: userError } = await userClient.auth.getUser();
+      if (userError || !userData.user) return json({ error: "invalid session" }, 401);
+
+      const { data: membership } = await admin
+        .from("workspace_members")
+        .select("id")
+        .eq("workspace_id", integration.workspace_id)
+        .eq("user_id", userData.user.id)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (!membership) return json({ error: "forbidden" }, 403);
+    }
 
     const { data: secret, error: secretError } = await admin
       .from("integration_secrets")

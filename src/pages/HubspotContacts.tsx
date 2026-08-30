@@ -4,6 +4,7 @@ import { useWorkspace } from "@/hooks/WorkspaceProvider";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { HubspotDetailDialog } from "@/components/HubspotDetailDialog";
+import { formatHubspotValue, useHubspotOwners, useHubspotPropertyDefs } from "@/lib/hubspotMeta";
 
 interface ContactRow {
   id: string;
@@ -34,6 +35,8 @@ export default function HubspotContacts() {
   const [stages, setStages] = useState<string[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [selectedContact, setSelectedContact] = useState<ContactRow | null>(null);
+  const owners = useHubspotOwners(workspace?.id);
+  const { defsByName } = useHubspotPropertyDefs(workspace?.id, "contacts");
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 350);
@@ -104,7 +107,7 @@ export default function HubspotContacts() {
           <option value="all">Todas as etapas</option>
           {stages.map((s) => (
             <option key={s} value={s}>
-              {s}
+              {formatHubspotValue(defsByName.lifecyclestage, s)}
             </option>
           ))}
         </select>
@@ -118,38 +121,44 @@ export default function HubspotContacts() {
               <th className="px-4 py-2 font-medium">E-mail</th>
               <th className="px-4 py-2 font-medium">Telefone</th>
               <th className="px-4 py-2 font-medium">Etapa</th>
+              <th className="px-4 py-2 font-medium">Proprietário</th>
               <th className="px-4 py-2 font-medium">Criado em</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">
+                <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
                   Carregando...
                 </td>
               </tr>
             )}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">
+                <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
                   Nenhum contato encontrado com esse filtro.
                 </td>
               </tr>
             )}
             {!loading &&
-              rows.map((c) => (
-                <tr
-                  key={c.id}
-                  onClick={() => setSelectedContact(c)}
-                  className="cursor-pointer border-t border-border hover:bg-muted/50"
-                >
-                  <td className="px-4 py-2">{[c.firstname, c.lastname].filter(Boolean).join(" ") || "—"}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{c.email ?? "—"}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{c.phone ?? "—"}</td>
-                  <td className="px-4 py-2">{c.lifecyclestage && <Badge variant="outline">{c.lifecyclestage}</Badge>}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{formatDate(c.created_at_hubspot)}</td>
-                </tr>
-              ))}
+              rows.map((c) => {
+                const ownerId = c.raw_properties?.hubspot_owner_id as string | undefined;
+                const stageLabel = formatHubspotValue(defsByName.lifecyclestage, c.lifecyclestage);
+                return (
+                  <tr
+                    key={c.id}
+                    onClick={() => setSelectedContact(c)}
+                    className="cursor-pointer border-t border-border hover:bg-muted/50"
+                  >
+                    <td className="px-4 py-2">{[c.firstname, c.lastname].filter(Boolean).join(" ") || "—"}</td>
+                    <td className="px-4 py-2 text-muted-foreground">{c.email ?? "—"}</td>
+                    <td className="px-4 py-2 text-muted-foreground">{c.phone ?? "—"}</td>
+                    <td className="px-4 py-2">{c.lifecyclestage && <Badge variant="outline">{stageLabel}</Badge>}</td>
+                    <td className="px-4 py-2 text-muted-foreground">{ownerId ? owners[ownerId] ?? "—" : "—"}</td>
+                    <td className="px-4 py-2 text-muted-foreground">{formatDate(c.created_at_hubspot)}</td>
+                  </tr>
+                );
+              })}
           </tbody>
         </table>
       </div>
@@ -185,6 +194,8 @@ export default function HubspotContacts() {
         onOpenChange={(open) => !open && setSelectedContact(null)}
         title={[selectedContact?.firstname, selectedContact?.lastname].filter(Boolean).join(" ") || "Contato"}
         properties={selectedContact?.raw_properties ?? null}
+        workspaceId={workspace?.id}
+        objectType="contacts"
       />
     </div>
   );

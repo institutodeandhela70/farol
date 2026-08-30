@@ -297,6 +297,7 @@ export default function Integracoes() {
   const [hubspotFeedback, setHubspotFeedback] = useState<{ type: "error" | "success"; text: string } | null>(null);
   const [hubspotDiagnostics, setHubspotDiagnostics] = useState<Diagnostics | null>(null);
   const [hubspotDiagnosing, setHubspotDiagnosing] = useState(false);
+  const [hubspotSyncing, setHubspotSyncing] = useState(false);
 
   const loadHubspotIntegration = async () => {
     if (!workspace) return;
@@ -364,6 +365,25 @@ export default function Integracoes() {
 
     setHubspotDiagnostics(data.results);
     await loadHubspotIntegration();
+  };
+
+  const handleSyncHubspot = async () => {
+    if (!hubspotIntegration) return;
+    setHubspotSyncing(true);
+    setHubspotFeedback(null);
+
+    const { data, error } = await supabase.functions.invoke("sync-hubspot", {
+      body: { integration_id: hubspotIntegration.id },
+    });
+
+    setHubspotSyncing(false);
+    await loadHubspotIntegration();
+
+    if (error || data?.error) {
+      setHubspotFeedback({ type: "error", text: data?.error ?? "Falha ao sincronizar." });
+    } else {
+      setHubspotFeedback({ type: "success", text: `Sincronizado: ${data?.synced ?? 0} registro(s).` });
+    }
   };
 
   const handleToggleSync = async (integrationId: string, current: boolean, reload: () => Promise<void>) => {
@@ -647,9 +667,16 @@ export default function Integracoes() {
               </p>
             )}
 
-            <Button onClick={handleSaveHubspotToken} disabled={hubspotSaving}>
-              {hubspotIntegration ? "Salvar token" : "Conectar"}
-            </Button>
+            <div className="flex gap-2">
+              <Button onClick={handleSaveHubspotToken} disabled={hubspotSaving}>
+                {hubspotIntegration ? "Salvar token" : "Conectar"}
+              </Button>
+              {hubspotIntegration?.status === "connected" && (
+                <Button variant="outline" onClick={handleSyncHubspot} disabled={hubspotSyncing}>
+                  {hubspotSyncing ? "Sincronizando..." : "Sincronizar agora"}
+                </Button>
+              )}
+            </div>
 
             {hubspotIntegration && (
               <Button variant="outline" onClick={() => handleDiagnoseHubspot()} disabled={hubspotDiagnosing}>

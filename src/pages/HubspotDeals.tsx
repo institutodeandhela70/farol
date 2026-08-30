@@ -4,6 +4,7 @@ import { useWorkspace } from "@/hooks/WorkspaceProvider";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { HubspotDetailDialog } from "@/components/HubspotDetailDialog";
+import { useHubspotOwners, useHubspotPipelines } from "@/lib/hubspotMeta";
 
 interface DealRow {
   id: string;
@@ -41,6 +42,8 @@ export default function HubspotDeals() {
   });
   const [summary, setSummary] = useState({ total_count: 0, total_amount: 0 });
   const [selectedDeal, setSelectedDeal] = useState<DealRow | null>(null);
+  const { pipelines, stageLabel } = useHubspotPipelines(workspace?.id);
+  const owners = useHubspotOwners(workspace?.id);
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 350);
@@ -111,39 +114,47 @@ export default function HubspotDeals() {
         </div>
       </div>
 
-      <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mt-6 flex flex-col gap-1.5">
+        <label className="text-xs font-medium text-muted-foreground">Pipeline</label>
+        <select
+          value={pipelineFilter}
+          onChange={(e) => setPipelineFilter(e.target.value)}
+          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm sm:w-72"
+        >
+          <option value="all">Todos os pipelines</option>
+          {pipelines.length > 0
+            ? pipelines.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))
+            : filterOptions.pipelines.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+        </select>
+      </div>
+
+      <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Input
           placeholder="Buscar por nome do negócio..."
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           className="sm:max-w-xs"
         />
-        <div className="flex gap-2">
-          <select
-            value={stageFilter}
-            onChange={(e) => setStageFilter(e.target.value)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-          >
-            <option value="all">Todos os estágios</option>
-            {filterOptions.dealstages.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <select
-            value={pipelineFilter}
-            onChange={(e) => setPipelineFilter(e.target.value)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-          >
-            <option value="all">Todos os pipelines</option>
-            {filterOptions.pipelines.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-        </div>
+        <select
+          value={stageFilter}
+          onChange={(e) => setStageFilter(e.target.value)}
+          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+        >
+          <option value="all">Todas as etapas</option>
+          {filterOptions.dealstages.map((s) => (
+            <option key={s} value={s}>
+              {stageLabel(s) ?? s}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="mt-4 overflow-x-auto overflow-hidden rounded-lg border border-border">
@@ -152,8 +163,8 @@ export default function HubspotDeals() {
             <tr>
               <th className="px-4 py-2 font-medium">Negócio</th>
               <th className="px-4 py-2 font-medium">Valor</th>
-              <th className="px-4 py-2 font-medium">Estágio</th>
-              <th className="px-4 py-2 font-medium">Pipeline</th>
+              <th className="px-4 py-2 font-medium">Etapa</th>
+              <th className="px-4 py-2 font-medium">Proprietário</th>
               <th className="px-4 py-2 font-medium">Fechamento</th>
             </tr>
           </thead>
@@ -173,19 +184,24 @@ export default function HubspotDeals() {
               </tr>
             )}
             {!loading &&
-              rows.map((d) => (
-                <tr
-                  key={d.id}
-                  onClick={() => setSelectedDeal(d)}
-                  className="cursor-pointer border-t border-border hover:bg-muted/50"
-                >
-                  <td className="px-4 py-2">{d.dealname ?? "—"}</td>
-                  <td className="px-4 py-2">{formatCurrency(d.amount)}</td>
-                  <td className="px-4 py-2">{d.dealstage && <Badge variant="outline">{d.dealstage}</Badge>}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{d.pipeline ?? "—"}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{formatDate(d.closedate)}</td>
-                </tr>
-              ))}
+              rows.map((d) => {
+                const ownerId = d.raw_properties?.hubspot_owner_id as string | undefined;
+                return (
+                  <tr
+                    key={d.id}
+                    onClick={() => setSelectedDeal(d)}
+                    className="cursor-pointer border-t border-border hover:bg-muted/50"
+                  >
+                    <td className="px-4 py-2">{d.dealname ?? "—"}</td>
+                    <td className="px-4 py-2">{formatCurrency(d.amount)}</td>
+                    <td className="px-4 py-2">
+                      {d.dealstage && <Badge variant="outline">{stageLabel(d.dealstage) ?? d.dealstage}</Badge>}
+                    </td>
+                    <td className="px-4 py-2 text-muted-foreground">{ownerId ? owners[ownerId] ?? "—" : "—"}</td>
+                    <td className="px-4 py-2 text-muted-foreground">{formatDate(d.closedate)}</td>
+                  </tr>
+                );
+              })}
           </tbody>
         </table>
       </div>
@@ -221,6 +237,8 @@ export default function HubspotDeals() {
         onOpenChange={(open) => !open && setSelectedDeal(null)}
         title={selectedDeal?.dealname || "Negócio"}
         properties={selectedDeal?.raw_properties ?? null}
+        workspaceId={workspace?.id}
+        objectType="deals"
       />
     </div>
   );
