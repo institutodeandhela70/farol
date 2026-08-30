@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { useWorkspace } from "@/hooks/WorkspaceProvider";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { HubspotDetailDialog } from "@/components/HubspotDetailDialog";
 
 interface ContactRow {
   id: string;
@@ -12,6 +13,7 @@ interface ContactRow {
   phone: string | null;
   lifecyclestage: string | null;
   created_at_hubspot: string | null;
+  raw_properties: Record<string, unknown>;
 }
 
 const PAGE_SIZE = 50;
@@ -31,6 +33,7 @@ export default function HubspotContacts() {
   const [page, setPage] = useState(1);
   const [stages, setStages] = useState<string[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [selectedContact, setSelectedContact] = useState<ContactRow | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 350);
@@ -64,7 +67,7 @@ export default function HubspotContacts() {
 
     let query = supabase
       .from("hubspot_contacts")
-      .select("id, email, firstname, lastname, phone, lifecyclestage, created_at_hubspot")
+      .select("id, email, firstname, lastname, phone, lifecyclestage, created_at_hubspot, raw_properties")
       .eq("workspace_id", workspace.id);
 
     if (stageFilter !== "all") query = query.eq("lifecyclestage", stageFilter);
@@ -135,7 +138,11 @@ export default function HubspotContacts() {
             )}
             {!loading &&
               rows.map((c) => (
-                <tr key={c.id} className="border-t border-border">
+                <tr
+                  key={c.id}
+                  onClick={() => setSelectedContact(c)}
+                  className="cursor-pointer border-t border-border hover:bg-muted/50"
+                >
                   <td className="px-4 py-2">{[c.firstname, c.lastname].filter(Boolean).join(" ") || "—"}</td>
                   <td className="px-4 py-2 text-muted-foreground">{c.email ?? "—"}</td>
                   <td className="px-4 py-2 text-muted-foreground">{c.phone ?? "—"}</td>
@@ -172,6 +179,13 @@ export default function HubspotContacts() {
           </div>
         </div>
       )}
+
+      <HubspotDetailDialog
+        open={!!selectedContact}
+        onOpenChange={(open) => !open && setSelectedContact(null)}
+        title={[selectedContact?.firstname, selectedContact?.lastname].filter(Boolean).join(" ") || "Contato"}
+        properties={selectedContact?.raw_properties ?? null}
+      />
     </div>
   );
 }

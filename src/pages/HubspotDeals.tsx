@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { useWorkspace } from "@/hooks/WorkspaceProvider";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { HubspotDetailDialog } from "@/components/HubspotDetailDialog";
 
 interface DealRow {
   id: string;
@@ -11,6 +12,7 @@ interface DealRow {
   dealstage: string | null;
   pipeline: string | null;
   closedate: string | null;
+  raw_properties: Record<string, unknown>;
 }
 
 const PAGE_SIZE = 50;
@@ -38,6 +40,7 @@ export default function HubspotDeals() {
     pipelines: [],
   });
   const [summary, setSummary] = useState({ total_count: 0, total_amount: 0 });
+  const [selectedDeal, setSelectedDeal] = useState<DealRow | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 350);
@@ -74,7 +77,7 @@ export default function HubspotDeals() {
 
     let query = supabase
       .from("hubspot_deals")
-      .select("id, dealname, amount, dealstage, pipeline, closedate")
+      .select("id, dealname, amount, dealstage, pipeline, closedate, raw_properties")
       .eq("workspace_id", workspace.id);
 
     if (stageFilter !== "all") query = query.eq("dealstage", stageFilter);
@@ -171,7 +174,11 @@ export default function HubspotDeals() {
             )}
             {!loading &&
               rows.map((d) => (
-                <tr key={d.id} className="border-t border-border">
+                <tr
+                  key={d.id}
+                  onClick={() => setSelectedDeal(d)}
+                  className="cursor-pointer border-t border-border hover:bg-muted/50"
+                >
                   <td className="px-4 py-2">{d.dealname ?? "—"}</td>
                   <td className="px-4 py-2">{formatCurrency(d.amount)}</td>
                   <td className="px-4 py-2">{d.dealstage && <Badge variant="outline">{d.dealstage}</Badge>}</td>
@@ -208,6 +215,13 @@ export default function HubspotDeals() {
           </div>
         </div>
       )}
+
+      <HubspotDetailDialog
+        open={!!selectedDeal}
+        onOpenChange={(open) => !open && setSelectedDeal(null)}
+        title={selectedDeal?.dealname || "Negócio"}
+        properties={selectedDeal?.raw_properties ?? null}
+      />
     </div>
   );
 }
