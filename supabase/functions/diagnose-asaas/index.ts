@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { logIntegrationCall } from "../_shared/integrationLog.ts";
 
 const ASAAS_BASE_URL: Record<string, string> = {
   sandbox: "https://api-sandbox.asaas.com/v3",
@@ -36,18 +37,34 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: CORS_HEADERS });
   }
 
+  const startedAt = Date.now();
+  let workspaceId: string | null = null;
+  let integrationId: string | null = null;
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const admin = createClient(supabaseUrl, serviceRoleKey);
+
+  const log = (params: { status: "success" | "error"; statusCode: number; response?: unknown; errorMessage?: string }) =>
+    logIntegrationCall(admin, {
+      workspaceId,
+      integrationId,
+      provider: "asaas",
+      direction: "outbound",
+      eventType: "diagnose",
+      request: { integration_id: integrationId },
+      durationMs: Date.now() - startedAt,
+      ...params,
+    });
+
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) return json({ error: "missing authorization" }, 401);
 
     const { integration_id } = await req.json();
     if (!integration_id) return json({ error: "integration_id required" }, 400);
+    integrationId = integration_id;
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-
-    const admin = createClient(supabaseUrl, serviceRoleKey);
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -61,6 +78,7 @@ Deno.serve(async (req) => {
       .eq("id", integration_id)
       .single();
     if (integrationError || !integration) return json({ error: "integration not found" }, 404);
+    workspaceId = integration.workspace_id;
 
     const { data: membership } = await admin
       .from("workspace_members")
@@ -76,7 +94,10 @@ Deno.serve(async (req) => {
       .select("api_key")
       .eq("integration_id", integration_id)
       .maybeSingle();
-    if (secretError || !secret) return json({ error: "no api key saved" }, 400);
+    if (secretError || !secret) {
+      await log({ status: "error", statusCode: 400, errorMessage: "no api key saved" });
+      return json({ error: "no api key saved" }, 400);
+    }
 
     const environment = integration.config?.environment === "production" ? "production" : "sandbox";
     const baseUrl = ASAAS_BASE_URL[environment];
@@ -141,8 +162,10 @@ Deno.serve(async (req) => {
       })
       .eq("id", integration_id);
 
+    await log({ status: "success", statusCode: 200, response: slimResults });
     return json({ environment, results });
   } catch (err) {
+    await log({ status: "error", statusCode: 500, errorMessage: String(err) });
     return json({ error: String(err) }, 500);
   }
 });

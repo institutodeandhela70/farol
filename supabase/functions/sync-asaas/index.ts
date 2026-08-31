@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { logIntegrationCall } from "../_shared/integrationLog.ts";
 
 const ASAAS_BASE_URL: Record<string, string> = {
   sandbox: "https://api-sandbox.asaas.com/v3",
@@ -26,8 +27,22 @@ Deno.serve(async (req) => {
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
   const admin = createClient(supabaseUrl, serviceRoleKey);
+  const startedAt = Date.now();
 
   let integrationId: string | undefined;
+  let workspaceId: string | null = null;
+
+  const log = (params: { status: "success" | "error"; statusCode: number; response?: unknown; errorMessage?: string }) =>
+    logIntegrationCall(admin, {
+      workspaceId,
+      integrationId: integrationId ?? null,
+      provider: "asaas",
+      direction: "outbound",
+      eventType: "sync",
+      request: { integration_id: integrationId },
+      durationMs: Date.now() - startedAt,
+      ...params,
+    });
 
   const markError = async (message: string) => {
     if (!integrationId) return;
@@ -35,6 +50,7 @@ Deno.serve(async (req) => {
       .from("integrations")
       .update({ status: "error", last_error: message.slice(0, 500) })
       .eq("id", integrationId);
+    await log({ status: "error", statusCode: 500, errorMessage: message });
   };
 
   try {
@@ -69,6 +85,7 @@ Deno.serve(async (req) => {
         .eq("id", integrationId)
         .maybeSingle();
       if (!integrationCheck) return json({ error: "integration not found" }, 404);
+      workspaceId = integrationCheck.workspace_id;
 
       const { data: membership } = await admin
         .from("workspace_members")
@@ -93,6 +110,7 @@ Deno.serve(async (req) => {
     if (integrationError || !integration) {
       return json({ error: "integration not found" }, 404);
     }
+    workspaceId = integration.workspace_id;
 
     const { data: secret, error: secretError } = await admin
       .from("integration_secrets")
@@ -181,6 +199,7 @@ Deno.serve(async (req) => {
       .update({ status: "connected", last_synced_at: new Date().toISOString(), last_error: null })
       .eq("id", integrationId);
 
+    await log({ status: "success", statusCode: 200, response: { synced: charges.length } });
     return json({ synced: charges.length });
   } catch (err) {
     await markError(`Erro inesperado: ${String(err)}`);

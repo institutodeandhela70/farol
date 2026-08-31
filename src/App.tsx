@@ -22,12 +22,14 @@ import HublaDashboard from "@/pages/HublaDashboard";
 import HubspotContacts from "@/pages/HubspotContacts";
 import HubspotDeals from "@/pages/HubspotDeals";
 import HubspotMeetings from "@/pages/HubspotMeetings";
+import IntegrationLogs from "@/pages/IntegrationLogs";
 
 const allRoutes = [...topLevelLinks, ...navGroups.flatMap((group) => group.children)];
 
 const customPages: Record<string, ComponentType> = {
   dashboard: VisaoGeral,
   "settings/integracoes": Integracoes,
+  "settings/integracoes-logs": IntegrationLogs,
   "dashboards/asaas": AsaasDashboard,
   "dashboards/hubla": HublaDashboard,
   "dashboards/hubspot-contatos": HubspotContacts,

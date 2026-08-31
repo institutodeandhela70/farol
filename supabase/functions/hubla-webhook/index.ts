@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { logIntegrationCall } from "../_shared/integrationLog.ts";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -278,13 +279,37 @@ async function handleRefundRequest(admin: Admin, workspaceId: string, body: any)
 }
 
 Deno.serve(async (req) => {
+  const startedAt = Date.now();
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const admin = createClient(supabaseUrl, serviceRoleKey);
+
+  let workspaceId: string | null = null;
+  let integrationId: string | null = null;
+
+  const log = (params: {
+    eventType: string;
+    status: "success" | "error";
+    statusCode: number;
+    request?: unknown;
+    response?: unknown;
+    errorMessage?: string;
+  }) =>
+    logIntegrationCall(admin, {
+      workspaceId,
+      integrationId,
+      provider: "hubla",
+      direction: "inbound",
+      durationMs: Date.now() - startedAt,
+      ...params,
+    });
+
   try {
     const token = req.headers.get("x-hubla-token");
-    if (!token) return json({ error: "missing x-hubla-token" }, 401);
-
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const admin = createClient(supabaseUrl, serviceRoleKey);
+    if (!token) {
+      await log({ eventType: "(sem token)", status: "error", statusCode: 401, errorMessage: "missing x-hubla-token" });
+      return json({ error: "missing x-hubla-token" }, 401);
+    }
 
     const { data: secretRow, error: secretError } = await admin
       .from("integration_secrets")
@@ -293,45 +318,61 @@ Deno.serve(async (req) => {
       .eq("integrations.provider", "hubla")
       .maybeSingle();
 
-    if (secretError || !secretRow) return json({ error: "invalid token" }, 401);
+    if (secretError || !secretRow) {
+      await log({ eventType: "(token inválido)", status: "error", statusCode: 401, errorMessage: "invalid token" });
+      return json({ error: "invalid token" }, 401);
+    }
 
-    const workspaceId = (secretRow.integrations as unknown as { workspace_id: string }).workspace_id;
+    workspaceId = (secretRow.integrations as unknown as { workspace_id: string }).workspace_id;
+    integrationId = secretRow.integration_id as string;
 
     const body = await req.json();
-    const type = body?.type as string | undefined;
+    const type = (body?.type as string | undefined) ?? "(sem type)";
 
     let result: { error?: { message: string } | null; skipped?: boolean } | null = null;
 
-    if (type?.startsWith("invoice.")) {
+    if (type.startsWith("invoice.")) {
       result = await handleInvoice(admin, workspaceId, body);
-    } else if (type?.startsWith("subscription.")) {
+    } else if (type.startsWith("subscription.")) {
       result = await handleSubscription(admin, workspaceId, type, body);
     } else if (type === "customer.member_added" || type === "customer.member_removed") {
       result = await handleMembership(admin, workspaceId, type, body);
     } else if (type === "lead.abandoned_checkout") {
       result = await handleAbandonedCheckout(admin, workspaceId, body);
-    } else if (type?.startsWith("smart_installment.")) {
+    } else if (type.startsWith("smart_installment.")) {
       result = await handleSmartInstallment(admin, workspaceId, body);
-    } else if (type?.startsWith("refund_request.")) {
+    } else if (type.startsWith("refund_request.")) {
       result = await handleRefundRequest(admin, workspaceId, body);
     } else {
       // Tipo desconhecido — responde 200 sem gravar nada pra Hubla não ficar reenviando.
+      await log({ eventType: type, status: "success", statusCode: 200, request: body, response: { ok: true, ignored: true } });
       return json({ ok: true, ignored: true });
     }
 
     if (result?.error) {
-      return json({ error: "failed to store event", detail: result.error.message }, 500);
+      const detail = result.error.message;
+      await log({
+        eventType: type,
+        status: "error",
+        statusCode: 500,
+        request: body,
+        errorMessage: detail,
+        response: { error: "failed to store event", detail },
+      });
+      return json({ error: "failed to store event", detail }, 500);
     }
 
     if (!result?.skipped) {
       await admin
         .from("integrations")
         .update({ status: "connected", last_synced_at: new Date().toISOString(), last_error: null })
-        .eq("id", secretRow.integration_id);
+        .eq("id", integrationId);
     }
 
+    await log({ eventType: type, status: "success", statusCode: 200, request: body, response: { ok: true } });
     return json({ ok: true });
   } catch (err) {
+    await log({ eventType: "(erro)", status: "error", statusCode: 500, errorMessage: String(err) });
     return json({ error: String(err) }, 500);
   }
 });

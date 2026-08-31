@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   type LucideIcon,
   Plug,
+  ScrollText,
   Settings,
   ShoppingBag,
   TrendingUp,
@@ -53,6 +54,7 @@ export const navGroups: NavGroup[] = [
     icon: Settings,
     children: [
       { id: "settings/integracoes", label: "Integrações", icon: Plug },
+      { id: "settings/integracoes-logs", label: "Logs de Integrações", icon: ScrollText },
       { id: "settings/equipe", label: "Equipe", icon: Users },
       { id: "settings/geral", label: "Geral", icon: Settings },
     ],

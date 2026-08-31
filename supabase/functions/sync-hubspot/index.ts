@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { logIntegrationCall } from "../_shared/integrationLog.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -261,14 +262,30 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: CORS_HEADERS });
   }
 
+  const startedAt = Date.now();
+  let workspaceId: string | null = null;
+  let integrationId: string | null = null;
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const admin = createClient(supabaseUrl, serviceRoleKey);
+
+  const log = (params: { status: "success" | "error"; statusCode: number; response?: unknown; errorMessage?: string }) =>
+    logIntegrationCall(admin, {
+      workspaceId,
+      integrationId,
+      provider: "hubspot",
+      direction: "outbound",
+      eventType: "sync",
+      request: { integration_id: integrationId },
+      durationMs: Date.now() - startedAt,
+      ...params,
+    });
+
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) return json({ error: "missing authorization" }, 401);
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const admin = createClient(supabaseUrl, serviceRoleKey);
 
     // service_role_key não é confiável pra essa checagem (o gateway já não aceita
     // o formato novo, e o valor exposto em runtime pode divergir do JWT legado).
@@ -279,6 +296,7 @@ Deno.serve(async (req) => {
 
     const { integration_id } = await req.json();
     if (!integration_id) return json({ error: "integration_id required" }, 400);
+    integrationId = integration_id;
 
     if (!isTrustedInternalCall) {
       // Chamada de usuário (clique manual) — confere sessão + participação no workspace.
@@ -294,6 +312,7 @@ Deno.serve(async (req) => {
         .eq("id", integration_id)
         .maybeSingle();
       if (!integrationCheck) return json({ error: "integration not found" }, 404);
+      workspaceId = integrationCheck.workspace_id;
 
       const { data: membership } = await admin
         .from("workspace_members")
@@ -312,13 +331,17 @@ Deno.serve(async (req) => {
       .eq("id", integration_id)
       .single();
     if (integrationError || !integration) return json({ error: "integration not found" }, 404);
+    workspaceId = integration.workspace_id;
 
     const { data: secret, error: secretError } = await admin
       .from("integration_secrets")
       .select("api_key")
       .eq("integration_id", integration_id)
       .maybeSingle();
-    if (secretError || !secret) return json({ error: "no api key saved" }, 400);
+    if (secretError || !secret) {
+      await log({ status: "error", statusCode: 400, errorMessage: "no api key saved" });
+      return json({ error: "no api key saved" }, 400);
+    }
 
     const headers = {
       Authorization: `Bearer ${secret.api_key}`,
@@ -502,8 +525,15 @@ Deno.serve(async (req) => {
       })
       .eq("id", integration_id);
 
+    await log({
+      status: lastError ? "error" : "success",
+      statusCode: 200,
+      response: { synced: totalSynced, state: syncState },
+      errorMessage: lastError ?? undefined,
+    });
     return json({ synced: totalSynced, error: lastError, state: syncState });
   } catch (err) {
+    await log({ status: "error", statusCode: 500, errorMessage: String(err) });
     return json({ error: String(err) }, 500);
   }
 });
