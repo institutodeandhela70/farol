@@ -55,11 +55,17 @@ Deno.serve(async (req) => {
 
   try {
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return json({ error: "missing authorization" }, 401);
+    if (!authHeader) {
+      await log({ status: "error", statusCode: 401, errorMessage: "missing authorization" });
+      return json({ error: "missing authorization" }, 401);
+    }
 
     const body = await req.json();
     integrationId = body?.integration_id;
-    if (!integrationId) return json({ error: "integration_id required" }, 400);
+    if (!integrationId) {
+      await log({ status: "error", statusCode: 400, errorMessage: "integration_id required" });
+      return json({ error: "integration_id required" }, 400);
+    }
 
     // service_role_key não é confiável pra essa checagem (o gateway já não aceita
     // o formato novo, e o valor exposto em runtime pode divergir do JWT legado).
@@ -84,7 +90,10 @@ Deno.serve(async (req) => {
         .select("workspace_id")
         .eq("id", integrationId)
         .maybeSingle();
-      if (!integrationCheck) return json({ error: "integration not found" }, 404);
+      if (!integrationCheck) {
+        await log({ status: "error", statusCode: 404, errorMessage: "integration not found" });
+        return json({ error: "integration not found" }, 404);
+      }
       workspaceId = integrationCheck.workspace_id;
 
       const { data: membership } = await admin
@@ -108,6 +117,7 @@ Deno.serve(async (req) => {
       .eq("id", integrationId)
       .single();
     if (integrationError || !integration) {
+      await log({ status: "error", statusCode: 404, errorMessage: "integration not found" });
       return json({ error: "integration not found" }, 404);
     }
     workspaceId = integration.workspace_id;
@@ -202,7 +212,11 @@ Deno.serve(async (req) => {
     await log({ status: "success", statusCode: 200, response: { synced: charges.length } });
     return json({ synced: charges.length });
   } catch (err) {
-    await markError(`Erro inesperado: ${String(err)}`);
+    if (integrationId) {
+      await markError(`Erro inesperado: ${String(err)}`);
+    } else {
+      await log({ status: "error", statusCode: 500, errorMessage: String(err) });
+    }
     return json({ error: String(err) }, 500);
   }
 });

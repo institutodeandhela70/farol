@@ -43,10 +43,16 @@ Deno.serve(async (req) => {
 
   try {
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return json({ error: "missing authorization" }, 401);
+    if (!authHeader) {
+      await log({ status: "error", statusCode: 401, errorMessage: "missing authorization" });
+      return json({ error: "missing authorization" }, 401);
+    }
 
     const { integration_id } = await req.json();
-    if (!integration_id) return json({ error: "integration_id required" }, 400);
+    if (!integration_id) {
+      await log({ status: "error", statusCode: 400, errorMessage: "integration_id required" });
+      return json({ error: "integration_id required" }, 400);
+    }
     integrationId = integration_id;
 
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -62,7 +68,10 @@ Deno.serve(async (req) => {
       .select("id, workspace_id, config")
       .eq("id", integration_id)
       .single();
-    if (integrationError || !integration) return json({ error: "integration not found" }, 404);
+    if (integrationError || !integration) {
+      await log({ status: "error", statusCode: 404, errorMessage: "integration not found" });
+      return json({ error: "integration not found" }, 404);
+    }
     workspaceId = integration.workspace_id;
 
     if (!isTrustedInternalCall) {
@@ -70,7 +79,10 @@ Deno.serve(async (req) => {
         global: { headers: { Authorization: authHeader } },
       });
       const { data: userData, error: userError } = await userClient.auth.getUser();
-      if (userError || !userData.user) return json({ error: "invalid session" }, 401);
+      if (userError || !userData.user) {
+        await log({ status: "error", statusCode: 401, errorMessage: `invalid session: ${userError?.message ?? "sem usuário"}` });
+        return json({ error: "invalid session" }, 401);
+      }
 
       const { data: membership } = await admin
         .from("workspace_members")
@@ -79,7 +91,10 @@ Deno.serve(async (req) => {
         .eq("user_id", userData.user.id)
         .eq("is_active", true)
         .maybeSingle();
-      if (!membership) return json({ error: "forbidden" }, 403);
+      if (!membership) {
+        await log({ status: "error", statusCode: 403, errorMessage: "forbidden: usuário não é membro ativo do workspace" });
+        return json({ error: "forbidden" }, 403);
+      }
     }
 
     const { data: secret, error: secretError } = await admin

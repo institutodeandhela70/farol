@@ -413,6 +413,9 @@ verify_jwt = false
 [functions.sync-asaas]
 verify_jwt = false
 
+[functions.diagnose-asaas]
+verify_jwt = false
+
 [functions.sync-hubspot]
 verify_jwt = false
 
