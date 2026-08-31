@@ -17,13 +17,14 @@ function json(body: unknown, status = 200) {
 // (cursor salvo em integrations.config.hubspot_sync).
 const TIME_BUDGET_MS = 45_000;
 
-const OBJECT_TYPES = ["contacts", "companies", "deals"] as const;
+const OBJECT_TYPES = ["contacts", "companies", "deals", "meetings"] as const;
 type ObjectType = (typeof OBJECT_TYPES)[number];
 
 const TABLE_BY_TYPE: Record<ObjectType, string> = {
   contacts: "hubspot_contacts",
   companies: "hubspot_companies",
   deals: "hubspot_deals",
+  meetings: "hubspot_meetings",
 };
 
 interface TypeSyncState {
@@ -51,6 +52,17 @@ function promotedColumns(type: ObjectType, props: Record<string, unknown>) {
       state: props.state ?? null,
     };
   }
+  if (type === "meetings") {
+    return {
+      title: props.hs_meeting_title ?? null,
+      start_time: props.hs_meeting_start_time || null,
+      end_time: props.hs_meeting_end_time || null,
+      outcome: props.hs_meeting_outcome ?? null,
+      activity_type: props.hs_activity_type ?? null,
+      owner_id: props.hubspot_owner_id ?? null,
+    };
+  }
+
   return {
     dealname: props.dealname ?? null,
     amount: props.amount ? Number(props.amount) : null,
@@ -152,13 +164,19 @@ async function syncPipelines(workspaceId: string, headers: Record<string, string
   }
 }
 
-async function syncOwners(workspaceId: string, headers: Record<string, string>, admin: ReturnType<typeof createClient>) {
+async function syncOwnersPage(
+  workspaceId: string,
+  headers: Record<string, string>,
+  admin: ReturnType<typeof createClient>,
+  archived: boolean,
+) {
   let after: string | null = null;
   let firstPage = true;
 
   while (firstPage || after) {
     firstPage = false;
     const params = new URLSearchParams({ limit: "100" });
+    if (archived) params.set("archived", "true");
     if (after) params.set("after", after);
 
     const res = await fetch(`https://api.hubapi.com/crm/v3/owners?${params.toString()}`, { headers });
@@ -182,6 +200,13 @@ async function syncOwners(workspaceId: string, headers: Record<string, string>, 
   }
 }
 
+async function syncOwners(workspaceId: string, headers: Record<string, string>, admin: ReturnType<typeof createClient>) {
+  // Traz ativos e desativados/removidos — reuniões antigas continuam associadas
+  // a um dono mesmo depois que a pessoa saiu da conta da HubSpot.
+  await syncOwnersPage(workspaceId, headers, admin, false);
+  await syncOwnersPage(workspaceId, headers, admin, true);
+}
+
 interface HubspotItem {
   id: string;
   properties: Record<string, unknown>;
@@ -189,11 +214,41 @@ interface HubspotItem {
   updatedAt?: string;
 }
 
-function toRows(type: ObjectType, workspaceId: string, items: HubspotItem[]) {
+// Vínculo reunião↔contato é uma associação, não uma propriedade — a HubSpot
+// não devolve isso no batch/read normal, precisa de uma chamada à parte.
+async function fetchMeetingContactAssociations(
+  ids: string[],
+  headers: Record<string, string>,
+): Promise<Record<string, string[]>> {
+  const map: Record<string, string[]> = {};
+  if (ids.length === 0) return map;
+
+  const res = await fetch("https://api.hubapi.com/crm/v4/associations/meetings/contacts/batch/read", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ inputs: ids.map((id) => ({ id })) }),
+  });
+  if (!res.ok) return map;
+
+  const body = await res.json();
+  const results: { from: { id: string }; to: { toObjectId: number }[] }[] = body.results ?? [];
+  for (const r of results) {
+    map[r.from.id] = (r.to ?? []).map((t) => String(t.toObjectId));
+  }
+  return map;
+}
+
+function toRows(
+  type: ObjectType,
+  workspaceId: string,
+  items: HubspotItem[],
+  contactIdsByMeeting: Record<string, string[]> = {},
+) {
   return items.map((item) => ({
     workspace_id: workspaceId,
     hubspot_id: item.id,
     ...promotedColumns(type, item.properties ?? {}),
+    ...(type === "meetings" ? { contact_ids: contactIdsByMeeting[item.id] ?? [] } : {}),
     created_at_hubspot: item.createdAt || null,
     updated_at_hubspot: item.updatedAt || null,
     raw_properties: item.properties ?? {},
@@ -338,9 +393,14 @@ Deno.serve(async (req) => {
             const batchBody = await batchRes.json();
             const results: HubspotItem[] = batchBody.results ?? [];
 
+            const contactIdsByMeeting =
+              type === "meetings" ? await fetchMeetingContactAssociations(ids, headers) : {};
+
             const { error: upsertError } = await admin
               .from(TABLE_BY_TYPE[type])
-              .upsert(toRows(type, integration.workspace_id, results), { onConflict: "workspace_id,hubspot_id" });
+              .upsert(toRows(type, integration.workspace_id, results, contactIdsByMeeting), {
+                onConflict: "workspace_id,hubspot_id",
+              });
             if (upsertError) {
               lastError = `Falha ao gravar ${type}: ${upsertError.message}`;
               break;
@@ -396,9 +456,19 @@ Deno.serve(async (req) => {
           const page = await res.json();
           const results: HubspotItem[] = page.results ?? [];
           if (results.length > 0) {
+            const contactIdsByMeeting =
+              type === "meetings"
+                ? await fetchMeetingContactAssociations(
+                    results.map((r) => r.id),
+                    headers,
+                  )
+                : {};
+
             const { error: upsertError } = await admin
               .from(TABLE_BY_TYPE[type])
-              .upsert(toRows(type, integration.workspace_id, results), { onConflict: "workspace_id,hubspot_id" });
+              .upsert(toRows(type, integration.workspace_id, results, contactIdsByMeeting), {
+                onConflict: "workspace_id,hubspot_id",
+              });
             if (upsertError) {
               lastError = `Falha ao gravar ${type}: ${upsertError.message}`;
               break;

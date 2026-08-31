@@ -83,6 +83,30 @@ export function useHubspotOwners(workspaceId: string | undefined) {
   return owners;
 }
 
+export function useHubspotContactNames(workspaceId: string | undefined, hubspotIds: string[]) {
+  const [names, setNames] = useState<Record<string, string>>({});
+  const idsKey = hubspotIds.slice().sort().join(",");
+
+  useEffect(() => {
+    if (!workspaceId || hubspotIds.length === 0) return;
+    supabase
+      .from("hubspot_contacts")
+      .select("hubspot_id, firstname, lastname, email")
+      .eq("workspace_id", workspaceId)
+      .in("hubspot_id", hubspotIds)
+      .then(({ data }) => {
+        const map: Record<string, string> = {};
+        for (const c of data ?? []) {
+          map[c.hubspot_id] = [c.firstname, c.lastname].filter(Boolean).join(" ") || c.email || c.hubspot_id;
+        }
+        setNames(map);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, idsKey]);
+
+  return names;
+}
+
 export interface HubspotPropertyDef {
   name: string;
   label: string;
