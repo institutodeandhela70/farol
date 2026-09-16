@@ -13,12 +13,20 @@ import { PlatformLayout } from "@/pages/platform/PlatformLayout";
 import AuthPage from "@/pages/Auth";
 import Onboarding from "@/pages/Onboarding";
 import InviteAccept from "@/pages/InviteAccept";
+import EventoInscricao from "@/pages/EventoInscricao";
+import EventoFicha from "@/pages/EventoFicha";
 import PlatformWorkspaces from "@/pages/platform/PlatformWorkspaces";
 import PlatformUsers from "@/pages/platform/PlatformUsers";
 import VisaoGeral from "@/pages/VisaoGeral";
 import Integracoes from "@/pages/Integracoes";
 import AsaasDashboard from "@/pages/AsaasDashboard";
 import HublaDashboard from "@/pages/HublaDashboard";
+import TmbDashboard from "@/pages/TmbDashboard";
+import ReceitasUpload from "@/pages/ReceitasUpload";
+import ReceitasEnriquecimento from "@/pages/ReceitasEnriquecimento";
+import ReceitasDashboard from "@/pages/ReceitasDashboard";
+import Eventos from "@/pages/Eventos";
+import EventoDetalhe from "@/pages/EventoDetalhe";
 import HubspotContacts from "@/pages/HubspotContacts";
 import HubspotDeals from "@/pages/HubspotDeals";
 import HubspotMeetings from "@/pages/HubspotMeetings";
@@ -28,10 +36,14 @@ const allRoutes = [...topLevelLinks, ...navGroups.flatMap((group) => group.child
 
 const customPages: Record<string, ComponentType> = {
   dashboard: VisaoGeral,
+  eventos: Eventos,
   "settings/integracoes": Integracoes,
   "settings/integracoes-logs": IntegrationLogs,
   "dashboards/asaas": AsaasDashboard,
   "dashboards/hubla": HublaDashboard,
+  "dashboards/tmb": TmbDashboard,
+  "financeiro/receitas": ReceitasUpload,
+  "financeiro/dashboard": ReceitasDashboard,
   "dashboards/hubspot-contatos": HubspotContacts,
   "dashboards/hubspot-negocios": HubspotDeals,
   "dashboards/hubspot-agendas": HubspotMeetings,
@@ -59,10 +71,14 @@ function App() {
                 <Route path="/auth" element={<AuthPage />} />
                 <Route path="/invite/:token" element={<InviteAccept />} />
                 <Route path="/onboarding" element={<Onboarding />} />
+                <Route path="/inscricao/:slug" element={<EventoInscricao />} />
+                <Route path="/inscricao/:slug/ficha" element={<EventoFicha />} />
 
                 <Route element={<ProtectedRoute />}>
                   <Route element={<AppLayout />}>
                     <Route index element={<Navigate to="/dashboard" replace />} />
+                    <Route path="financeiro/receitas/:importId" element={<ReceitasEnriquecimento />} />
+                    <Route path="eventos/:eventId" element={<EventoDetalhe />} />
                     {allRoutes.map((route) => {
                       const CustomPage = customPages[route.id];
                       return (

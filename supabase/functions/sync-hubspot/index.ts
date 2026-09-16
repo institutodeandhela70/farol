@@ -18,7 +18,7 @@ function json(body: unknown, status = 200) {
 // (cursor salvo em integrations.config.hubspot_sync).
 const TIME_BUDGET_MS = 45_000;
 
-const OBJECT_TYPES = ["contacts", "companies", "deals", "meetings"] as const;
+const OBJECT_TYPES = ["contacts", "companies", "deals", "meetings", "products"] as const;
 type ObjectType = (typeof OBJECT_TYPES)[number];
 
 const TABLE_BY_TYPE: Record<ObjectType, string> = {
@@ -26,6 +26,7 @@ const TABLE_BY_TYPE: Record<ObjectType, string> = {
   companies: "hubspot_companies",
   deals: "hubspot_deals",
   meetings: "hubspot_meetings",
+  products: "hubspot_products",
 };
 
 interface TypeSyncState {
@@ -61,6 +62,14 @@ function promotedColumns(type: ObjectType, props: Record<string, unknown>) {
       outcome: props.hs_meeting_outcome ?? null,
       activity_type: props.hs_activity_type ?? null,
       owner_id: props.hubspot_owner_id ?? null,
+    };
+  }
+  if (type === "products") {
+    return {
+      name: props.name ?? null,
+      price: props.price ? Number(props.price) : null,
+      sku: props.hs_sku ?? null,
+      description: props.description ?? null,
     };
   }
 

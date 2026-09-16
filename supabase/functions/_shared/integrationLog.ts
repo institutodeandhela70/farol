@@ -4,7 +4,7 @@ type Admin = any;
 export interface LogIntegrationCallParams {
   workspaceId: string | null;
   integrationId: string | null;
-  provider: "asaas" | "hubla" | "hotmart" | "tmb" | "hubspot";
+  provider: "asaas" | "hubla" | "hotmart" | "tmb" | "hubspot" | "vsix";
   direction: "inbound" | "outbound";
   eventType: string;
   status: "success" | "error";

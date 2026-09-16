@@ -1,17 +1,22 @@
 import {
+  BarChart3,
   Briefcase,
   CalendarCheck,
+  CalendarRange,
   Contact,
   CreditCard,
   FileSpreadsheet,
   GraduationCap,
+  Landmark,
   LayoutDashboard,
   type LucideIcon,
   Plug,
+  Receipt,
   ScrollText,
   Settings,
   ShoppingBag,
   TrendingUp,
+  Upload,
   Users,
 } from "lucide-react";
 
@@ -30,6 +35,7 @@ export interface NavGroup {
 
 export const topLevelLinks: NavLink[] = [
   { id: "dashboard", label: "Visão geral", icon: LayoutDashboard },
+  { id: "eventos", label: "Eventos", icon: CalendarRange },
 ];
 
 export const navGroups: NavGroup[] = [
@@ -44,8 +50,17 @@ export const navGroups: NavGroup[] = [
       { id: "dashboards/hubspot-contatos", label: "HubSpot Contatos", icon: Contact },
       { id: "dashboards/hubspot-agendas", label: "HubSpot Agendas", icon: CalendarCheck },
       { id: "dashboards/hotmart", label: "Hotmart", icon: GraduationCap },
-      { id: "dashboards/tmb", label: "TMB", icon: TrendingUp },
+      { id: "dashboards/tmb", label: "TMB", icon: Receipt },
       { id: "dashboards/planilhas", label: "Planilhas", icon: FileSpreadsheet },
+    ],
+  },
+  {
+    id: "financeiro",
+    label: "Financeiro",
+    icon: Landmark,
+    children: [
+      { id: "financeiro/dashboard", label: "Dashboard", icon: BarChart3 },
+      { id: "financeiro/receitas", label: "Receitas", icon: Upload },
     ],
   },
   {

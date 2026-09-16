@@ -2,9 +2,13 @@ import { supabase } from "@/lib/supabase";
 
 interface SaveCredentialParams {
   workspaceId: string;
-  provider: "asaas" | "hubla" | "hotmart" | "tmb" | "hubspot";
+  provider: "asaas" | "hubla" | "hotmart" | "tmb" | "hubspot" | "vsix";
   config: Record<string, unknown>;
   secretValue: string;
+  // Só a TMB usa isso hoje: ela tem duas credenciais distintas (Bearer token
+  // da REST API em secretValue, valor do header do webhook aqui) — os demais
+  // providers têm uma credencial só e não passam esse campo.
+  webhookSecretValue?: string;
 }
 
 interface SaveCredentialResult {
@@ -22,6 +26,7 @@ export async function saveIntegrationCredential({
   provider,
   config,
   secretValue,
+  webhookSecretValue,
 }: SaveCredentialParams): Promise<SaveCredentialResult> {
   const { data: existing } = await supabase
     .from("integrations")
@@ -43,15 +48,18 @@ export async function saveIntegrationCredential({
     if (error) return { integrationId: null, error: error.message };
   }
 
+  const secretRow: Record<string, string> = { api_key: secretValue };
+  if (webhookSecretValue !== undefined) secretRow.webhook_secret = webhookSecretValue;
+
   const { error: updateSecretError } = await supabase
     .from("integration_secrets")
-    .update({ api_key: secretValue })
+    .update(secretRow)
     .eq("integration_id", integrationId);
   if (updateSecretError) return { integrationId: null, error: updateSecretError.message };
 
   const { error: insertSecretError } = await supabase
     .from("integration_secrets")
-    .insert({ integration_id: integrationId, api_key: secretValue });
+    .insert({ integration_id: integrationId, ...secretRow });
   if (insertSecretError && insertSecretError.code !== "23505") {
     return { integrationId: null, error: insertSecretError.message };
   }
