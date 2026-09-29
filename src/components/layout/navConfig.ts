@@ -3,6 +3,17 @@ import {
   Briefcase,
   CalendarCheck,
   CalendarRange,
+  CalendarClock,
+  Filter,
+  Handshake,
+  Target,
+  UserRound,
+  FileText,
+  FolderKanban,
+  HandCoins,
+  Repeat,
+  ShoppingCart,
+  Wallet,
   Contact,
   CreditCard,
   FileSpreadsheet,
@@ -39,6 +50,32 @@ export const topLevelLinks: NavLink[] = [
 ];
 
 export const navGroups: NavGroup[] = [
+  {
+    id: "comercial",
+    label: "Comercial",
+    icon: Handshake,
+    children: [
+      { id: "comercial/visao-geral", label: "Visão Geral", icon: LayoutDashboard },
+      { id: "comercial/agenda", label: "Agenda & Produtividade", icon: CalendarClock },
+      { id: "comercial/pipeline", label: "Pipeline & Previsão", icon: Filter },
+      { id: "comercial/fechamento", label: "Fechamento Mensal", icon: BarChart3 },
+      { id: "comercial/vendedor", label: "Ficha do Vendedor", icon: UserRound },
+      { id: "comercial/metas", label: "Metas", icon: Target },
+    ],
+  },
+  {
+    id: "iuli",
+    label: "Financeiro IULI",
+    icon: Wallet,
+    children: [
+      { id: "iuli/visao-geral", label: "Visão Geral", icon: LayoutDashboard },
+      { id: "iuli/vendas", label: "Vendas", icon: ShoppingCart },
+      { id: "iuli/receber", label: "Contas a Receber", icon: HandCoins },
+      { id: "iuli/notas", label: "Notas Fiscais", icon: FileText },
+      { id: "iuli/assinaturas", label: "Assinaturas", icon: Repeat },
+      { id: "iuli/cadastros", label: "Projetos & Cadastros", icon: FolderKanban },
+    ],
+  },
   {
     id: "dashboards",
     label: "Dashboards",

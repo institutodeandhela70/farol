@@ -7,6 +7,7 @@ import { navGroups, topLevelLinks, type NavGroup, type NavLink } from "@/compone
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
 import { UserMenu } from "@/components/UserMenu";
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin";
+import { usePermissions, menuPermissionKey } from "@/hooks/usePermissions";
 
 function Logo({ collapsed }: { collapsed: boolean }) {
   return (
@@ -147,9 +148,15 @@ function SidebarGroup({
 
 export function Sidebar() {
   const { isAdmin: isPlatformAdmin } = usePlatformAdmin();
+  const { has } = usePermissions();
   const location = useLocation();
   const currentPath = location.pathname.replace(/^\//, "");
   const [collapsed, setCollapsed] = useState(false);
+
+  const visibleTopLevelLinks = topLevelLinks.filter((link) => has(menuPermissionKey(link.id)));
+  const visibleGroups = navGroups
+    .map((group) => ({ ...group, children: group.children.filter((child) => has(menuPermissionKey(child.id))) }))
+    .filter((group) => group.children.length > 0);
 
   const initialExpanded = useMemo(() => {
     const set = new Set<string>();
@@ -189,7 +196,7 @@ export function Sidebar() {
       </button>
 
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 py-2">
-        {topLevelLinks.map((link) => (
+        {visibleTopLevelLinks.map((link) => (
           <SidebarLink
             key={link.id}
             to={link.id}
@@ -202,7 +209,7 @@ export function Sidebar() {
 
         <div className="my-2 h-px bg-sidebar-border" />
 
-        {navGroups.map((group) => (
+        {visibleGroups.map((group) => (
           <SidebarGroup
             key={group.id}
             group={group}

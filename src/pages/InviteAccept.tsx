@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { useWorkspace } from "@/hooks/WorkspaceProvider";
+import { useWorkspace, type WorkspaceRole } from "@/hooks/WorkspaceProvider";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 
 interface InviteRow {
   id: string;
   workspace_id: string;
-  role: "owner" | "admin" | "member";
+  role: WorkspaceRole;
   status: string;
   expires_at: string;
   workspace: { name: string } | null;

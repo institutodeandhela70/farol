@@ -17,9 +17,11 @@ export interface WorkspaceSummary {
   logo_url: string | null;
 }
 
+export type WorkspaceRole = "owner" | "admin" | "manager" | "vendedor";
+
 export interface Membership {
   id: string;
-  role: "owner" | "admin" | "member";
+  role: WorkspaceRole;
   workspace: WorkspaceSummary;
 }
 

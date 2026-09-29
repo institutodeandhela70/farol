@@ -25,6 +25,8 @@ const PROVIDER_LABEL: Record<string, string> = {
   hotmart: "Hotmart",
   tmb: "TMB",
   hubspot: "HubSpot",
+  vsix: "VSIX",
+  iuli: "IULI",
 };
 
 function formatDateTime(value: string) {

@@ -1,11 +1,12 @@
 import { useEffect } from "react";
 import { Link, NavLink, Outlet } from "react-router-dom";
-import { ArrowLeft, Building2, Users } from "lucide-react";
+import { ArrowLeft, Building2, Mail, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const platformNav = [
   { to: "/platform/workspaces", label: "Workspaces", icon: Building2 },
   { to: "/platform/usuarios", label: "Usuários", icon: Users },
+  { to: "/platform/emails", label: "E-mails", icon: Mail },
 ];
 
 export function PlatformLayout() {

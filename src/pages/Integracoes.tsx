@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { saveIntegrationCredential } from "@/lib/integrations";
+import { IuliIntegrationDialog } from "@/components/iuli/IuliIntegrationDialog";
 import { useWorkspace } from "@/hooks/WorkspaceProvider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type IntegrationStatus = "disconnected" | "connected" | "error";
-type ProviderId = "asaas" | "hubla" | "hubspot" | "tmb" | "vsix";
+type ProviderId = "asaas" | "hubla" | "hubspot" | "tmb" | "vsix" | "iuli" | "brevo";
 
 interface IntegrationRow {
   id: string;
@@ -23,6 +24,10 @@ interface IntegrationRow {
     instance_id?: string;
     last_diagnostics?: Diagnostics;
     last_diagnostics_at?: string;
+    tools?: string[];
+    sender_name?: string;
+    sender_email?: string;
+    reply_to?: string;
   };
 }
 
@@ -61,6 +66,21 @@ const RESOURCE_LABEL: Record<string, string> = {
   meetings: "Reuniões",
   tasks: "Tarefas",
   notes: "Notas",
+  // IULI
+  get_accounts_receivable: "Contas a receber",
+  get_accounts_payable: "Contas a pagar",
+  get_sales_summary: "Resumo de vendas (mês)",
+  get_bank_balance: "Saldo bancário",
+  get_cashflow: "Fluxo de caixa",
+  get_dre: "DRE",
+  get_dfc: "DFC",
+  list_charges: "Cobranças",
+  list_invoices: "Notas fiscais",
+  list_sales: "Vendas",
+  list_products: "Produtos",
+  list_cost_centers: "Centros de custo",
+  list_projects: "Projetos",
+  list_subscriptions: "Assinaturas",
 };
 
 interface ProviderDef {
@@ -78,6 +98,8 @@ const PROVIDERS: ProviderDef[] = [
   { id: "hubspot", name: "HubSpot", description: "CRM — contatos, negócios, tickets.", color: "#FF7A59", letter: "H" },
   { id: "tmb", name: "TMB", description: "Vendas parceladas via boleto.", color: "#F59E0B", letter: "T" },
   { id: "vsix", name: "VSIX", description: "Mensageria de WhatsApp.", color: "#25D366", letter: "V" },
+  { id: "iuli", name: "IULI", description: "ERP financeiro — vendas, a receber, assinaturas.", color: "#2563EB", letter: "I" },
+  { id: "brevo", name: "Brevo", description: "E-mail transacional — boas-vindas, reset de senha.", color: "#0B996E", letter: "B" },
   { id: "hotmart", name: "Hotmart", description: "Em breve.", color: "#64748B", letter: "H", comingSoon: true },
 ];
 
@@ -581,6 +603,119 @@ export default function Integracoes() {
     }
   };
 
+  // --- IULI (uma conexão por empresa — ver IuliIntegrationDialog) ---
+  const [iuliIntegration, setIuliIntegration] = useState<IntegrationRow | null>(null);
+
+  // --- Brevo ---
+  const [brevoIntegration, setBrevoIntegration] = useState<IntegrationRow | null>(null);
+  const [brevoApiKey, setBrevoApiKey] = useState("");
+  const [brevoSenderName, setBrevoSenderName] = useState("Farol ID");
+  const [brevoSenderEmail, setBrevoSenderEmail] = useState("");
+  const [brevoReplyTo, setBrevoReplyTo] = useState("");
+  const [brevoSaving, setBrevoSaving] = useState(false);
+  const [brevoFeedback, setBrevoFeedback] = useState<{ type: "error" | "success"; text: string } | null>(null);
+  const [brevoTestEmail, setBrevoTestEmail] = useState("");
+  const [brevoTesting, setBrevoTesting] = useState(false);
+
+  const loadBrevoIntegration = async () => {
+    if (!workspace) return;
+    const { data } = await supabase
+      .from("integrations")
+      .select("id, status, last_synced_at, last_error, sync_enabled, config")
+      .eq("workspace_id", workspace.id)
+      .eq("provider", "brevo")
+      .maybeSingle();
+    const row = data as IntegrationRow | null;
+    setBrevoIntegration(row);
+    setBrevoSenderName(row?.config?.sender_name ?? "Farol ID");
+    setBrevoSenderEmail(row?.config?.sender_email ?? "");
+    setBrevoReplyTo(row?.config?.reply_to ?? "");
+  };
+
+  useEffect(() => {
+    loadBrevoIntegration();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace?.id]);
+
+  const handleSaveBrevo = async () => {
+    if (!workspace) return;
+    if (!brevoSenderEmail.trim()) {
+      setBrevoFeedback({ type: "error", text: "Informe o e-mail do remetente antes de salvar." });
+      return;
+    }
+    if (!brevoApiKey.trim() && !brevoIntegration) {
+      setBrevoFeedback({ type: "error", text: "Cole a API key do Brevo antes de conectar." });
+      return;
+    }
+
+    setBrevoSaving(true);
+    setBrevoFeedback(null);
+
+    const trimmedKey = brevoApiKey.trim();
+    const config: Record<string, unknown> = {
+      sender_name: brevoSenderName.trim() || "Farol ID",
+      sender_email: brevoSenderEmail.trim(),
+      reply_to: brevoReplyTo.trim() || undefined,
+    };
+    if (trimmedKey) config.key_preview = trimmedKey.slice(-4);
+    else if (brevoIntegration?.config.key_preview) config.key_preview = brevoIntegration.config.key_preview;
+
+    if (!trimmedKey) {
+      // Só mudou remetente/reply-to, mantém a chave já salva.
+      const { error } = await supabase.from("integrations").update({ config }).eq("id", brevoIntegration!.id);
+      setBrevoSaving(false);
+      if (error) {
+        setBrevoFeedback({ type: "error", text: error.message });
+        return;
+      }
+      setBrevoFeedback({ type: "success", text: "Configuração salva." });
+      await loadBrevoIntegration();
+      return;
+    }
+
+    const { error } = await saveIntegrationCredential({
+      workspaceId: workspace.id,
+      provider: "brevo",
+      config,
+      secretValue: trimmedKey,
+    });
+
+    setBrevoSaving(false);
+
+    if (error) {
+      setBrevoFeedback({ type: "error", text: error });
+      return;
+    }
+
+    setBrevoApiKey("");
+    setBrevoFeedback({ type: "success", text: "Integração salva." });
+    await loadBrevoIntegration();
+  };
+
+  const handleTestBrevo = async () => {
+    if (!brevoIntegration) return;
+    if (!brevoTestEmail.trim()) {
+      setBrevoFeedback({ type: "error", text: "Informe um e-mail de destino pra mandar o teste." });
+      return;
+    }
+
+    setBrevoTesting(true);
+    setBrevoFeedback(null);
+
+    const { data, error } = await supabase.functions.invoke("send-test-email", {
+      body: { integration_id: brevoIntegration.id, to_email: brevoTestEmail.trim() },
+    });
+
+    setBrevoTesting(false);
+    await loadBrevoIntegration();
+
+    if (error || data?.error) {
+      setBrevoFeedback({ type: "error", text: `Falha ao enviar: ${data?.error ?? error?.message}` });
+    } else {
+      setBrevoFeedback({ type: "success", text: `E-mail de teste enviado para ${brevoTestEmail.trim()}.` });
+    }
+  };
+
   const handleToggleSync = async (integrationId: string, current: boolean, reload: () => Promise<void>) => {
     await supabase.from("integrations").update({ sync_enabled: !current }).eq("id", integrationId);
     await reload();
@@ -596,6 +731,8 @@ export default function Integracoes() {
     hubspot: hubspotIntegration,
     tmb: tmbIntegration,
     vsix: vsixIntegration,
+    iuli: iuliIntegration,
+    brevo: brevoIntegration,
   };
 
   const connectedProviders = PROVIDERS.filter(
@@ -1075,6 +1212,116 @@ export default function Integracoes() {
                 </div>
                 <Button variant="outline" onClick={handleTestVsix} disabled={vsixTesting}>
                   {vsixTesting ? "Enviando..." : "Enviar teste"}
+                </Button>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* --- Modal IULI --- */}
+      <IuliIntegrationDialog
+        workspaceId={workspace?.id}
+        open={openDialog === "iuli"}
+        onOpenChange={(o) => setOpenDialog(o ? "iuli" : null)}
+        onSummaryChange={(summary) => setIuliIntegration(summary as IntegrationRow | null)}
+        renderDiagnostics={(d) => <DiagnosticsTable diagnostics={d} />}
+      />
+
+      {/* --- Modal Brevo --- */}
+      <Dialog open={openDialog === "brevo"} onOpenChange={(o) => setOpenDialog(o ? "brevo" : null)}>
+        <DialogContent>
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <DialogTitle>Brevo</DialogTitle>
+              {brevoIntegration && (
+                <Badge variant={statusVariant[brevoIntegration.status]}>{statusLabel[brevoIntegration.status]}</Badge>
+              )}
+            </div>
+            <DialogDescription>
+              E-mail transacional — boas-vindas com senha temporária, reset de senha e convites de equipe.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="brevo-sender-name">Nome do remetente</Label>
+              <Input
+                id="brevo-sender-name"
+                placeholder="Farol ID"
+                value={brevoSenderName}
+                onChange={(e) => setBrevoSenderName(e.target.value)}
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="brevo-sender-email">E-mail do remetente</Label>
+              <Input
+                id="brevo-sender-email"
+                type="email"
+                placeholder="contato@seudominio.com.br"
+                value={brevoSenderEmail}
+                onChange={(e) => setBrevoSenderEmail(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">Precisa ser um remetente/domínio verificado na sua conta Brevo.</p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="brevo-reply-to">Reply-to (opcional)</Label>
+              <Input
+                id="brevo-reply-to"
+                type="email"
+                placeholder="suporte@seudominio.com.br"
+                value={brevoReplyTo}
+                onChange={(e) => setBrevoReplyTo(e.target.value)}
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="brevo-key">API key</Label>
+              <Input
+                id="brevo-key"
+                type="password"
+                placeholder={brevoIntegration ? "Cole uma nova chave pra trocar a atual" : "Cole a API key do Brevo (xkeysib-...)"}
+                value={brevoApiKey}
+                onChange={(e) => setBrevoApiKey(e.target.value)}
+              />
+              {brevoIntegration?.config.key_preview && (
+                <p className="text-xs text-muted-foreground">Chave salva: •••• {brevoIntegration.config.key_preview}</p>
+              )}
+            </div>
+
+            {brevoFeedback && (
+              <p className={brevoFeedback.type === "error" ? "text-sm text-destructive" : "text-sm text-primary"}>
+                {brevoFeedback.text}
+              </p>
+            )}
+
+            {brevoIntegration?.last_synced_at && (
+              <p className="text-xs text-muted-foreground">
+                Último teste enviado: {new Date(brevoIntegration.last_synced_at).toLocaleString("pt-BR")}
+              </p>
+            )}
+
+            <Button onClick={handleSaveBrevo} disabled={brevoSaving}>
+              {brevoSaving ? "Salvando..." : brevoIntegration ? "Salvar" : "Conectar"}
+            </Button>
+
+            {brevoIntegration && (
+              <div className="mt-2 flex flex-col gap-3 border-t border-border pt-3">
+                <p className="text-sm font-medium">Enviar e-mail de teste</p>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="brevo-test-email">E-mail de destino</Label>
+                  <Input
+                    id="brevo-test-email"
+                    type="email"
+                    placeholder="voce@exemplo.com"
+                    value={brevoTestEmail}
+                    onChange={(e) => setBrevoTestEmail(e.target.value)}
+                  />
+                </div>
+                <Button variant="outline" onClick={handleTestBrevo} disabled={brevoTesting}>
+                  {brevoTesting ? "Enviando..." : "Enviar teste"}
                 </Button>
               </div>
             )}

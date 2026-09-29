@@ -18,6 +18,22 @@ function json(body: unknown, status = 200) {
 // (cursor salvo em integrations.config.hubspot_sync).
 const TIME_BUDGET_MS = 45_000;
 
+// A HubSpot limita requisições por segundo (a API de busca é a mais apertada).
+// Um único 429 já derrubou o sync inteiro e deixou a integração em "error" —
+// então espera e tenta de novo antes de desistir.
+const MAX_RETRIES = 4;
+
+async function hubspotFetch(url: string, init?: RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, init);
+    if (res.status !== 429 || attempt >= MAX_RETRIES) return res;
+    await res.body?.cancel();
+    const retryAfter = Number(res.headers.get("Retry-After"));
+    const waitMs = retryAfter > 0 ? retryAfter * 1000 : 1000 * 2 ** attempt;
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+}
+
 const OBJECT_TYPES = ["contacts", "companies", "deals", "meetings", "products"] as const;
 type ObjectType = (typeof OBJECT_TYPES)[number];
 
@@ -62,6 +78,10 @@ function promotedColumns(type: ObjectType, props: Record<string, unknown>) {
       outcome: props.hs_meeting_outcome ?? null,
       activity_type: props.hs_activity_type ?? null,
       owner_id: props.hubspot_owner_id ?? null,
+      // Quem agendou (user id da HubSpot, não owner id) — é o que separa o SDR
+      // que marcou da pessoa que conduz a reunião.
+      created_by_user_id: props.hs_created_by_user_id || null,
+      source: props.hs_meeting_source || null,
     };
   }
   if (type === "products") {
@@ -81,6 +101,11 @@ function promotedColumns(type: ObjectType, props: Record<string, unknown>) {
     // A HubSpot às vezes devolve "" (string vazia) em vez de null pra data
     // não preenchida — Postgres rejeita "" como timestamp, então normaliza aqui.
     closedate: props.closedate || null,
+    owner_id: props.hubspot_owner_id || null,
+    closer_owner_id: props.closer_responsavel || null,
+    stage_probability: props.hs_deal_stage_probability ? Number(props.hs_deal_stage_probability) : null,
+    is_closed: props.hs_is_closed === "true",
+    is_closed_won: props.hs_is_closed_won === "true",
   };
 }
 
@@ -105,8 +130,8 @@ async function fetchPropertyDefs(
   admin: ReturnType<typeof createClient>,
 ): Promise<string[]> {
   const [propsRes, groupsRes] = await Promise.all([
-    fetch(`https://api.hubapi.com/crm/v3/properties/${type}`, { headers }),
-    fetch(`https://api.hubapi.com/crm/v3/properties/${type}/groups`, { headers }),
+    hubspotFetch(`https://api.hubapi.com/crm/v3/properties/${type}`, { headers }),
+    hubspotFetch(`https://api.hubapi.com/crm/v3/properties/${type}/groups`, { headers }),
   ]);
   if (!propsRes.ok) throw new Error(`failed to list properties for ${type}: HTTP ${propsRes.status}`);
   const propsBody = await propsRes.json();
@@ -142,7 +167,7 @@ async function fetchPropertyDefs(
 }
 
 async function syncPipelines(workspaceId: string, headers: Record<string, string>, admin: ReturnType<typeof createClient>) {
-  const res = await fetch("https://api.hubapi.com/crm/v3/pipelines/deals", { headers });
+  const res = await hubspotFetch("https://api.hubapi.com/crm/v3/pipelines/deals", { headers });
   if (!res.ok) return;
   const body = await res.json();
   const pipelines: { id: string; label: string; displayOrder: number; stages: { id: string; label: string; displayOrder: number }[] }[] =
@@ -189,14 +214,16 @@ async function syncOwnersPage(
     if (archived) params.set("archived", "true");
     if (after) params.set("after", after);
 
-    const res = await fetch(`https://api.hubapi.com/crm/v3/owners?${params.toString()}`, { headers });
+    const res = await hubspotFetch(`https://api.hubapi.com/crm/v3/owners?${params.toString()}`, { headers });
     if (!res.ok) return;
     const body = await res.json();
-    const owners: { id: string; email?: string; firstName?: string; lastName?: string }[] = body.results ?? [];
+    const owners: { id: string; userId?: number; email?: string; firstName?: string; lastName?: string }[] =
+      body.results ?? [];
 
     const rows = owners.map((o) => ({
       workspace_id: workspaceId,
       owner_id: o.id,
+      user_id: o.userId != null ? String(o.userId) : null,
       email: o.email ?? null,
       first_name: o.firstName ?? null,
       last_name: o.lastName ?? null,
@@ -233,7 +260,7 @@ async function fetchMeetingContactAssociations(
   const map: Record<string, string[]> = {};
   if (ids.length === 0) return map;
 
-  const res = await fetch("https://api.hubapi.com/crm/v4/associations/meetings/contacts/batch/read", {
+  const res = await hubspotFetch("https://api.hubapi.com/crm/v4/associations/meetings/contacts/batch/read", {
     method: "POST",
     headers,
     body: JSON.stringify({ inputs: ids.map((id) => ({ id })) }),
@@ -381,6 +408,17 @@ Deno.serve(async (req) => {
     let totalSynced = 0;
     let lastError: string | null = null;
 
+    // Salva o progresso a cada página, não só no fim: se a função cair no meio
+    // (limite de CPU/memória com backlog grande), a próxima execução continua
+    // daqui em vez de reprocessar tudo e cair no mesmo ponto de novo.
+    const checkpoint = (type: ObjectType, state: TypeSyncState) => {
+      syncState[type] = state;
+      return admin
+        .from("integrations")
+        .update({ config: { ...integration.config, hubspot_sync: syncState } })
+        .eq("id", integration_id);
+    };
+
     // Metadados (pipelines/etapas, donos) — pequenos, sincroniza sempre por
     // completo antes do loop principal, pra alimentar os nomes legíveis no frontend.
     try {
@@ -419,7 +457,7 @@ Deno.serve(async (req) => {
           const params = new URLSearchParams({ limit: "100" });
           if (after) params.set("after", after);
 
-          const listRes = await fetch(`https://api.hubapi.com/crm/v3/objects/${type}?${params.toString()}`, {
+          const listRes = await hubspotFetch(`https://api.hubapi.com/crm/v3/objects/${type}?${params.toString()}`, {
             headers,
           });
           if (!listRes.ok) {
@@ -431,7 +469,7 @@ Deno.serve(async (req) => {
           const ids: string[] = (listPage.results ?? []).map((r: { id: string }) => r.id);
 
           if (ids.length > 0) {
-            const batchRes = await fetch(`https://api.hubapi.com/crm/v3/objects/${type}/batch/read`, {
+            const batchRes = await hubspotFetch(`https://api.hubapi.com/crm/v3/objects/${type}/batch/read`, {
               method: "POST",
               headers,
               body: JSON.stringify({ properties, inputs: ids.map((id) => ({ id })) }),
@@ -463,6 +501,7 @@ Deno.serve(async (req) => {
           }
 
           after = listPage.paging?.next?.after ?? null;
+          if (after) await checkpoint(type, { cursor: after, backfilled: false, since: maxSeenModified });
         }
 
         syncState[type] = {
@@ -472,10 +511,16 @@ Deno.serve(async (req) => {
         };
       } else {
         // Já fez a carga inicial: só busca o que mudou desde a última passada,
-        // via API de busca (aqui o volume é pequeno o suficiente pra nunca
-        // chegar perto do teto de 10 mil).
-        const sinceMillis = state.since ? new Date(state.since).getTime() : null;
+        // via API de busca. A busca não pagina além de 10 mil resultados — se
+        // mudou mais que isso (atualização em massa na HubSpot), ao chegar perto
+        // do teto reinicia a paginação a partir do último hs_lastmodifieddate
+        // já gravado (ordem é crescente, então nada fica pra trás). GTE em vez
+        // de GT pra não pular registros com o mesmo milissegundo da virada —
+        // reprocessar um ou dois é inofensivo (upsert).
+        const SEARCH_CAP = 10_000;
+        let windowSince = state.since;
         let after = state.cursor;
+        if (after && Number(after) + 100 > SEARCH_CAP) after = null; // cursor inválido de versão antiga
         let firstPage = true;
         let reachedEnd = false;
 
@@ -487,13 +532,17 @@ Deno.serve(async (req) => {
             sorts: [{ propertyName: "hs_lastmodifieddate", direction: "ASCENDING" }],
           };
           if (after) body.after = after;
-          if (sinceMillis) {
+          if (windowSince) {
             body.filterGroups = [
-              { filters: [{ propertyName: "hs_lastmodifieddate", operator: "GT", value: String(sinceMillis) }] },
+              {
+                filters: [
+                  { propertyName: "hs_lastmodifieddate", operator: "GTE", value: String(new Date(windowSince).getTime()) },
+                ],
+              },
             ];
           }
 
-          const res = await fetch(`https://api.hubapi.com/crm/v3/objects/${type}/search`, {
+          const res = await hubspotFetch(`https://api.hubapi.com/crm/v3/objects/${type}/search`, {
             method: "POST",
             headers,
             body: JSON.stringify(body),
@@ -531,13 +580,22 @@ Deno.serve(async (req) => {
           }
 
           after = page.paging?.next?.after ?? null;
-          if (!after) reachedEnd = true;
+          if (!after) {
+            reachedEnd = true;
+          } else if (Number(after) + 100 > SEARCH_CAP && maxSeenModified) {
+            windowSince = maxSeenModified;
+            after = null;
+            firstPage = true;
+            await checkpoint(type, { cursor: null, backfilled: true, since: windowSince });
+          } else {
+            await checkpoint(type, { cursor: after, backfilled: true, since: windowSince });
+          }
         }
 
         syncState[type] = {
-          cursor: after,
+          cursor: reachedEnd ? null : after,
           backfilled: true,
-          since: reachedEnd ? maxSeenModified ?? state.since : state.since,
+          since: reachedEnd ? maxSeenModified ?? windowSince : windowSince,
         };
       }
     }

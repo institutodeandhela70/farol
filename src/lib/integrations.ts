@@ -2,13 +2,19 @@ import { supabase } from "@/lib/supabase";
 
 interface SaveCredentialParams {
   workspaceId: string;
-  provider: "asaas" | "hubla" | "hotmart" | "tmb" | "hubspot" | "vsix";
+  provider: "asaas" | "hubla" | "hotmart" | "tmb" | "hubspot" | "vsix" | "iuli" | "brevo";
   config: Record<string, unknown>;
   secretValue: string;
   // Só a TMB usa isso hoje: ela tem duas credenciais distintas (Bearer token
   // da REST API em secretValue, valor do header do webhook aqui) — os demais
   // providers têm uma credencial só e não passam esse campo.
   webhookSecretValue?: string;
+  // A IULI aceita várias conexões no mesmo workspace (uma por empresa, cada
+  // uma com seu token). integrationId atualiza uma conexão específica;
+  // forceNew cria mais uma; label é o nome que o usuário deu à empresa.
+  integrationId?: string;
+  forceNew?: boolean;
+  label?: string;
 }
 
 interface SaveCredentialResult {
@@ -27,24 +33,32 @@ export async function saveIntegrationCredential({
   config,
   secretValue,
   webhookSecretValue,
+  integrationId: targetId,
+  forceNew,
+  label,
 }: SaveCredentialParams): Promise<SaveCredentialResult> {
-  const { data: existing } = await supabase
-    .from("integrations")
-    .select("id")
-    .eq("workspace_id", workspaceId)
-    .eq("provider", provider)
-    .maybeSingle();
-
-  let integrationId = existing?.id as string | undefined;
+  let integrationId = targetId;
+  if (!integrationId && !forceNew) {
+    const { data: existing } = await supabase
+      .from("integrations")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .eq("provider", provider)
+      .maybeSingle();
+    integrationId = existing?.id as string | undefined;
+  }
 
   if (integrationId) {
-    const { error } = await supabase.from("integrations").update({ config }).eq("id", integrationId);
+    const { error } = await supabase
+      .from("integrations")
+      .update(label !== undefined ? { config, label } : { config })
+      .eq("id", integrationId);
     if (error) return { integrationId: null, error: error.message };
   } else {
     integrationId = crypto.randomUUID();
     const { error } = await supabase
       .from("integrations")
-      .insert({ id: integrationId, workspace_id: workspaceId, provider, config });
+      .insert({ id: integrationId, workspace_id: workspaceId, provider, config, ...(label !== undefined ? { label } : {}) });
     if (error) return { integrationId: null, error: error.message };
   }
 

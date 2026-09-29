@@ -421,3 +421,12 @@ verify_jwt = false
 
 [functions.diagnose-hubspot]
 verify_jwt = false
+
+[functions.diagnose-iuli]
+verify_jwt = false
+
+[functions.sync-iuli]
+verify_jwt = false
+
+[functions.sync-iuli-records]
+verify_jwt = false
