@@ -531,7 +531,8 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { integration_id } = body as { integration_id?: string };
+    // force_recent: botão "Atualizar agora" — relê as janelas recentes mesmo sem estarem vencidas.
+    const { integration_id, force_recent } = body as { integration_id?: string; force_recent?: boolean };
     if (!integration_id) {
       await log({ status: "error", statusCode: 400, errorMessage: "integration_id required" });
       return json({ error: "integration_id required" }, 400);
@@ -636,6 +637,7 @@ Deno.serve(async (req) => {
         const s = state.get(t.task);
         if (!s) return true;
         if (s.started_at && !s.completed_at) return true;
+        if (force_recent && t.tier === 0) return true;
         return new Date(s.next_run_at).getTime() <= now;
       });
       for (const t of active) {

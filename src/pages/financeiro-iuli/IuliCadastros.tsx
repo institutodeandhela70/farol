@@ -15,6 +15,7 @@ import { IULI_SOURCES as S } from "@/lib/iuliSources";
 import { EmptyState, KpiCard, Panel } from "@/components/commercial/CommercialUI";
 import { Input } from "@/components/ui/input";
 import { IuliShell, StatusPill } from "@/components/iuli/IuliUI";
+import { CounterpartyRulesPanel } from "@/components/iuli/CounterpartyRulesPanel";
 
 const PROJECT_TONE: Record<Project["situacao"], "ok" | "warn" | "bad" | "neutral"> = {
   em_andamento: "ok",
@@ -47,7 +48,7 @@ export default function IuliCadastros() {
   }, [projects, costCenters, situacao, search]);
 
   return (
-    <IuliShell title="Projetos & Cadastros" description="Estrutura cadastrada na IULI: projetos, centros de custo, produtos e cobranças">
+    <IuliShell title="Projetos & Cadastros" description="Estrutura cadastrada na IULI: projetos, centros de custo, produtos e cobranças" singleCompany>
       <section aria-label="Indicadores" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard
           info={S.projects()}
@@ -174,6 +175,7 @@ export default function IuliCadastros() {
           <EmptyState>Nenhum boleto ou Pix emitido pela própria IULI. As cobranças devem estar saindo por outra plataforma.</EmptyState>
         )}
       </Panel>
+      <CounterpartyRulesPanel info={S.counterparties()} />
     </IuliShell>
   );
 }

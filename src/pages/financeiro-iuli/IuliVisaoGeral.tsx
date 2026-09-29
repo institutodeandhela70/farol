@@ -1,196 +1,207 @@
 import { useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useWorkspace } from "@/hooks/WorkspaceProvider";
-import { addMonths, currentYM, delta, formatBRL, formatBRLShort, formatInt, formatPct, monthLabel } from "@/lib/commercial";
+import { delta, formatBRL, formatBRLShort, formatInt, formatPct } from "@/lib/commercial";
+import { companyHasTool, INVOICE_STATUS, invoiceLabel, useIuliCompanies } from "@/lib/iuli";
 import {
-  groupSales,
-  invoiceLabel,
-  INVOICE_STATUS,
-  lastMonths,
-  snap,
-  useIuliSnapshots,
-  type Invoices,
-  type Receivable,
-  type SalesStatus,
-  type SalesSummary,
-  type Subscriptions,
-} from "@/lib/iuli";
+  bucketLabel,
+  bucketsBetween,
+  sumBy,
+  useInvoicesAgg,
+  useReceivablesFlow,
+  useReceivablesPosition,
+  useSalesAgg,
+  useSalesTop,
+  useSubscriptionsAgg,
+  type SalesAggRow,
+} from "@/lib/iuliData";
+import { periodText, previousRange, useIuliFilters } from "@/lib/iuliFilters";
 import { IULI_SOURCES as S } from "@/lib/iuliSources";
-import { BarList, EmptyState, KpiCard, Panel, WarnNote } from "@/components/commercial/CommercialUI";
+import { BarList, EmptyState, KpiCard, LoadingBlock, Panel, WarnNote } from "@/components/commercial/CommercialUI";
 import { GroupedMonthChart, IuliShell, StatusPill } from "@/components/iuli/IuliUI";
 import { TONE } from "@/components/iuli/iuliTheme";
+import { CompanyFilter, IntercompanyToggle, PeriodFilter } from "@/components/iuli/IuliFilterBar";
 
 export default function IuliVisaoGeral() {
   const { workspace } = useWorkspace();
-  const { data: snaps } = useIuliSnapshots(workspace?.id);
-  const ym = currentYM();
-  const prev = addMonths(ym, -1);
+  const ws = workspace?.id;
+  const location = useLocation();
+  const { filters, set } = useIuliFilters();
+  const { data: companies = [] } = useIuliCompanies(ws);
+  const prev = previousRange(filters.from, filters.to);
+  const filtersNoIE = { ...filters, entreEmpresas: "incluir" as const };
 
-  const d = useMemo(() => {
-    const statusNow = snap<SalesStatus>(snaps, `sales_status_month:${ym}`);
-    const statusPrev = snap<SalesStatus>(snaps, `sales_status_month:${prev}`);
-    const now = groupSales(statusNow?.por_status);
-    const before = groupSales(statusPrev?.por_status);
-    const summary = snap<SalesSummary>(snaps, `sales_month:${ym}`);
-    const ar = snap<Receivable>(snaps, "ar:overview");
-    const arNow = snap<Receivable>(snaps, `ar_month:${ym}`);
-    const arPrev = snap<Receivable>(snaps, `ar_month:${prev}`);
-    const invoices = snap<Invoices>(snaps, "invoices:all");
-    const subs = snap<Subscriptions>(snaps, "subscriptions:all");
+  const sales = useSalesAgg(ws, filters);
+  const salesPrev = useSalesAgg(ws, filters, { range: prev });
+  const salesSeries = useSalesAgg(ws, filters, { grain: true });
+  const flow = useReceivablesFlow(ws, filters);
+  const flowPrev = useReceivablesFlow(ws, filters, { range: prev });
+  const flowSeries = useReceivablesFlow(ws, filters, { grain: true });
+  const position = useReceivablesPosition(ws, filters);
+  const positionWithIE = useReceivablesPosition(ws, filtersNoIE);
+  const products = useSalesTop(ws, filters, "produto", 6);
+  const invoices = useInvoicesAgg(ws, filters);
+  const subsNew = useSubscriptionsAgg(ws, filters, { period: true });
+  const subsAll = useSubscriptionsAgg(ws, filters);
 
-    const chart = lastMonths(6).map((m) => {
-      const s = groupSales(snap<SalesStatus>(snaps, `sales_status_month:${m}`)?.por_status);
-      const r = snap<Receivable>(snaps, `ar_month:${m}`);
-      return { month: m, label: monthLabel(m), vendas: s.efetiva.total, recebido: r?.total_recebidas ?? 0 };
+  const k = useMemo(() => {
+    const eff = (rows: SalesAggRow[] | undefined) => ({
+      qtd: sumBy(rows, (r) => r.qtd, (r) => r.grupo === "efetiva"),
+      total: sumBy(rows, (r) => r.total, (r) => r.grupo === "efetiva"),
     });
+    const pos = position.data ?? [];
+    const vencido = sumBy(pos, (p) => p.total, (p) => p.faixa.startsWith("vencido"));
+    const aberto = sumBy(pos, (p) => p.total);
+    const velho = pos.find((p) => p.faixa === "vencido_365_mais")?.total ?? 0;
+    const bruto = sumBy(sales.data, (r) => r.total);
+    const subsTotal = sumBy(subsAll.data, (r) => r.qtd);
+    return {
+      now: eff(sales.data),
+      before: eff(salesPrev.data),
+      bruto,
+      recebido: sumBy(flow.data, (r) => r.total, (r) => r.serie === "recebido"),
+      recebidoPrev: sumBy(flowPrev.data, (r) => r.total, (r) => r.serie === "recebido"),
+      aberto,
+      vencido,
+      velho,
+      abertoEntreEmpresas: sumBy(positionWithIE.data, (p) => p.total) - aberto,
+      novas: sumBy(subsNew.data, (r) => r.qtd),
+      novasMensal: sumBy(subsNew.data, (r) => r.mensal),
+      subsTotal,
+      subsOdd: sumBy(subsAll.data, (r) => r.qtd, (r) => r.status === "1"),
+      invoiceTotal: sumBy(invoices.data, (r) => r.qtd),
+      invoiceBad: sumBy(invoices.data, (r) => r.qtd, (r) => INVOICE_STATUS[r.status]?.tone === "bad"),
+    };
+  }, [sales.data, salesPrev.data, flow.data, flowPrev.data, position.data, positionWithIE.data, subsNew.data, subsAll.data, invoices.data]);
 
-    const invoiceTotal = (invoices?.por_status ?? []).reduce((a, r) => a + r.qtd, 0);
-    const invoiceBad = (invoices?.por_status ?? []).filter((r) => INVOICE_STATUS[r.status]?.tone === "bad").reduce((a, r) => a + r.qtd, 0);
-    const odd = subs?.por_status.find((s) => s.status === "1");
+  const chart = useMemo(() => {
+    const v = new Map<string, number>();
+    for (const r of salesSeries.data ?? []) if (r.bucket && r.grupo === "efetiva") v.set(r.bucket, (v.get(r.bucket) ?? 0) + r.total);
+    const rec = new Map<string, number>();
+    for (const r of flowSeries.data ?? []) if (r.bucket && r.serie === "recebido") rec.set(r.bucket, (rec.get(r.bucket) ?? 0) + r.total);
+    return bucketsBetween(filters.from, filters.to, filters.grain).map((b) => ({ label: bucketLabel(b, filters.grain), vendas: v.get(b) ?? 0, recebido: rec.get(b) ?? 0 }));
+  }, [salesSeries.data, flowSeries.data, filters.from, filters.to, filters.grain]);
 
-    return { statusNow, now, before, summary, ar, arNow, arPrev, invoices, invoiceTotal, invoiceBad, subs, odd, chart };
-  }, [snaps, ym, prev]);
+  const byInvoiceStatus = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of invoices.data ?? []) map.set(r.status, (map.get(r.status) ?? 0) + r.qtd);
+    return [...map.entries()].sort((a, b) => b[1] - a[1]);
+  }, [invoices.data]);
 
-  const overdueRatio = d.ar && d.ar.total_a_receber ? d.ar.total_vencidas / d.ar.total_a_receber : null;
-  const ticket = d.now.efetiva.qtd ? d.now.efetiva.total / d.now.efetiva.qtd : 0;
-  const grossGap = d.summary ? d.summary.total_vendas - d.now.efetiva.total : 0;
+  const unknown = products.data?.find((p) => p.nome === "(não identificado)");
+  const overdueRatio = k.aberto ? k.vencido / k.aberto : null;
+  const ticket = k.now.qtd ? k.now.total / k.now.qtd : 0;
+  const inScope = filters.empresa === "todas" ? companies : companies.filter((c) => c.id === filters.empresa);
+  const invoicesAvailable = inScope.some((c) => companyHasTool(c, "list_invoices") !== false);
+  const link = (pathname: string) => ({ pathname, search: location.search });
+  const grainText = filters.grain === "day" ? "por dia" : filters.grain === "week" ? "por semana" : "por mês";
 
   return (
-    <IuliShell title="Visão Geral" description={`${monthLabel(ym, true)} · vendas por competência, recebimentos por vencimento`}>
+    <IuliShell
+      title="Visão Geral"
+      description={`${periodText(filters.preset, filters.from, filters.to)} · vendas por competência, recebimentos pela data do pagamento`}
+      scope={filters.empresa}
+      filters={
+        <>
+          <PeriodFilter filters={filters} set={set} />
+          <CompanyFilter filters={filters} set={set} />
+          <IntercompanyToggle filters={filters} set={set} />
+        </>
+      }
+    >
       <section aria-label="Indicadores" className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
-        <KpiCard
-          info={S.effectiveSales()}
-          label="Vendas efetivas no mês"
-          value={formatBRLShort(d.now.efetiva.total)}
-          change={delta(d.now.efetiva.total, d.before.efetiva.total)}
-          sub={`vs ${monthLabel(prev)}`}
-          loading={!d.statusNow}
-        />
-        <KpiCard
-          info={S.salesCount()}
-          label="Vendas efetivas"
-          value={formatInt(d.now.efetiva.qtd)}
-          change={delta(d.now.efetiva.qtd, d.before.efetiva.qtd)}
-          sub={`ticket ${formatBRLShort(ticket)}`}
-          loading={!d.statusNow}
-        />
-        <KpiCard
-          info={S.received()}
-          label="Recebido no mês"
-          value={formatBRLShort(d.arNow?.total_recebidas ?? 0)}
-          change={delta(d.arNow?.total_recebidas ?? 0, d.arPrev?.total_recebidas ?? 0)}
-          sub="títulos que vencem no mês"
-          loading={!d.arNow}
-        />
-        <KpiCard
-          info={S.receivablePending()}
-          label="A receber (sem baixa)"
-          value={formatBRLShort(d.ar?.total_a_receber ?? 0)}
-          sub={`${formatInt(d.ar?.quantidade ?? 0)} títulos`}
-          loading={!d.ar}
-        />
+        <KpiCard info={S.effectiveSales()} label="Vendas efetivas" value={formatBRLShort(k.now.total)} change={delta(k.now.total, k.before.total)} sub="vs período anterior" loading={sales.isLoading} />
+        <KpiCard info={S.salesCount()} label="Vendas efetivas" value={formatInt(k.now.qtd)} change={delta(k.now.qtd, k.before.qtd)} sub={`ticket ${formatBRLShort(ticket)}`} loading={sales.isLoading} />
+        <KpiCard info={S.receivedByPayment()} label="Recebido no período" value={formatBRLShort(k.recebido)} change={delta(k.recebido, k.recebidoPrev)} sub="pela data do pagamento" loading={flow.isLoading} />
+        <KpiCard info={S.receivablePending()} label="A receber hoje" value={formatBRLShort(k.aberto)} sub="sem baixa, qualquer vencimento" loading={position.isLoading} />
         <KpiCard
           info={S.receivableOverdue()}
           label="Vencido sem baixa"
-          value={formatBRLShort(d.ar?.total_vencidas ?? 0)}
+          value={formatBRLShort(k.vencido)}
           sub={`${formatPct(overdueRatio)} do a receber`}
           tone={overdueRatio !== null && overdueRatio > 0.3 ? "warn" : "default"}
-          loading={!d.ar}
+          loading={position.isLoading}
         />
-        <KpiCard
-          info={S.subscriptionsTotal()}
-          label="Assinaturas"
-          value={formatInt(d.subs?.total_encontrado ?? 0)}
-          sub={`MRR declarado ${formatBRLShort((d.subs?.por_status ?? []).reduce((a, s) => a + s.mrr, 0))}`}
-          loading={!d.subs}
-        />
+        <KpiCard info={S.subscriptionsByMonth()} label="Novas assinaturas" value={formatInt(k.novas)} sub={`${formatBRLShort(k.novasMensal)}/mês no período`} loading={subsNew.isLoading} />
       </section>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <Panel
-          title="Vendas × recebimentos"
-          info={S.salesChart()}
-          action={<span className="text-sm text-muted-foreground">Últimos 6 meses</span>}
-          className="xl:col-span-2"
-        >
-          <GroupedMonthChart
-            data={d.chart}
-            series={[
-              { key: "vendas", label: "Vendas efetivas", color: TONE.primary },
-              { key: "recebido", label: "Recebido", color: TONE.blue },
-            ]}
-            format={formatBRLShort}
-            tooltipFormat={formatBRL}
-          />
+        <Panel title="Vendas × recebimentos" info={S.salesVsReceived()} action={<span className="text-sm text-muted-foreground">{grainText}</span>} className="xl:col-span-2">
+          {salesSeries.isLoading || flowSeries.isLoading ? (
+            <LoadingBlock className="h-64" />
+          ) : (
+            <GroupedMonthChart
+              data={chart}
+              format={formatBRLShort}
+              tooltipFormat={formatBRL}
+              series={[
+                { key: "vendas", label: "Vendas efetivas", color: TONE.primary },
+                { key: "recebido", label: "Recebido", color: TONE.blue },
+              ]}
+            />
+          )}
         </Panel>
 
         <Panel title="Qualidade dos dados" info={S.dataQuality()}>
           <div className="flex flex-col gap-3">
-            {overdueRatio !== null && overdueRatio > 0.3 && (
+            {k.velho > 0 && k.vencido > 0 && k.velho / k.vencido > 0.5 && (
               <WarnNote>
-                <strong>{formatBRLShort(d.ar!.total_vencidas)}</strong> ({formatPct(overdueRatio)} do a receber) estão vencidos sem baixa, a maior parte há mais de um ano. Provavelmente são baixas não registradas na IULI.{" "}
-                <Link to="/iuli/receber" className="font-medium underline">Ver aging</Link>
+                <strong>{formatBRLShort(k.velho)}</strong> do vencido tem mais de um ano sem baixa — provavelmente baixas não registradas na IULI.{" "}
+                <Link to={link("/iuli/receber")} className="font-medium underline">Ver aging</Link>
               </WarnNote>
             )}
-            {d.odd && d.subs && d.odd.qtd / Math.max(1, d.subs.total_encontrado) > 0.5 && (
+            {k.subsTotal > 0 && k.subsOdd / k.subsTotal > 0.5 && (
               <WarnNote>
-                <strong>{formatInt(d.odd.qtd)} de {formatInt(d.subs.total_encontrado)}</strong> assinaturas estão com status "1", nem ativa nem cancelada. O MRR declarado não é confiável.
+                <strong>{formatInt(k.subsOdd)} de {formatInt(k.subsTotal)}</strong> assinaturas estão com status "1" (nem ativa nem cancelada) — o MRR não é confiável.
               </WarnNote>
             )}
-            {grossGap > 0 && (
+            {unknown && k.bruto > 0 && unknown.total / k.bruto > 0.3 && (
               <WarnNote>
-                O total de vendas da IULI no mês ({formatBRLShort(d.summary!.total_vendas)}) inclui <strong>{formatBRLShort(grossGap)}</strong> em vendas canceladas, reembolsadas ou só iniciadas. Aqui a gente usa só as efetivas.
+                {formatPct(unknown.total / k.bruto)} do valor vendido no período está sem produto identificado (vendas que não vieram da Hubla nem da TMB).
               </WarnNote>
+            )}
+            {filters.empresa === "todas" && filters.entreEmpresas === "excluir" && k.abertoEntreEmpresas > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Fora do consolidado: {formatBRLShort(k.abertoEntreEmpresas)} a receber entre as próprias empresas do grupo.
+              </p>
             )}
           </div>
         </Panel>
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <Panel
-          title="Produtos que mais venderam no mês"
-          info={S.topProducts()}
-          action={<Link to="/iuli/vendas" className="text-sm font-medium text-primary hover:underline">Ver vendas</Link>}
-          className="xl:col-span-2"
-        >
-          {d.summary?.top_produtos.length ? (
-            <BarList
-              items={d.summary.top_produtos.slice(0, 6).map((p) => ({
-                key: p.produto,
-                label: `${p.produto} · ${formatInt(p.qty)}`,
-                value: p.total,
-                display: formatBRLShort(p.total),
-              }))}
-            />
+        <Panel title="Produtos que mais venderam" info={S.topProducts()} action={<Link to={link("/iuli/vendas")} className="text-sm font-medium text-primary hover:underline">Ver vendas</Link>} className="xl:col-span-2">
+          {products.isLoading ? (
+            <LoadingBlock />
+          ) : products.data?.length ? (
+            <BarList items={products.data.map((p) => ({ key: p.nome, label: `${p.nome} · ${formatInt(p.qtd)}`, value: p.total, display: formatBRLShort(p.total) }))} />
           ) : (
-            <EmptyState>Sem vendas no mês.</EmptyState>
+            <EmptyState>Sem vendas no período.</EmptyState>
           )}
         </Panel>
 
-        <Panel
-          title="Notas fiscais"
-          info={S.invoicesStatus()}
-          action={<Link to="/iuli/notas" className="text-sm font-medium text-primary hover:underline">Ver notas</Link>}
-        >
-          <div className="flex flex-col gap-3">
-            <div className="flex items-baseline justify-between">
-              <span className="text-sm text-muted-foreground">Emitidas no histórico</span>
-              <span className="text-xl font-semibold tabular-nums">{formatInt(d.invoiceTotal)}</span>
+        <Panel title="Notas fiscais no período" info={S.invoicesStatus()} action={<Link to={link("/iuli/notas")} className="text-sm font-medium text-primary hover:underline">Ver notas</Link>}>
+          {!invoicesAvailable ? (
+            <EmptyState>O token desta empresa não libera notas fiscais.</EmptyState>
+          ) : invoices.isLoading ? (
+            <LoadingBlock />
+          ) : (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-baseline justify-between">
+                <span className="text-sm text-muted-foreground">Emitidas</span>
+                <span className="text-xl font-semibold tabular-nums">{formatInt(k.invoiceTotal)}</span>
+              </div>
+              <ul className="flex flex-col gap-2">
+                {byInvoiceStatus.map(([status, qtd]) => (
+                  <li key={status} className="flex items-center justify-between gap-2 text-sm">
+                    <StatusPill tone={INVOICE_STATUS[status]?.tone ?? "neutral"}>{invoiceLabel(status)}</StatusPill>
+                    <span className="tabular-nums">{formatInt(qtd)}</span>
+                  </li>
+                ))}
+              </ul>
+              {k.invoiceBad > 0 && <p className="text-xs text-muted-foreground">{formatPct(k.invoiceBad / Math.max(1, k.invoiceTotal), 1)} tiveram emissão ou cancelamento negado.</p>}
             </div>
-            <ul className="flex flex-col gap-2">
-              {(d.invoices?.por_status ?? []).map((r) => (
-                <li key={r.status} className="flex items-center justify-between gap-2 text-sm">
-                  <StatusPill tone={INVOICE_STATUS[r.status]?.tone ?? "neutral"}>{invoiceLabel(r.status)}</StatusPill>
-                  <span className="tabular-nums">{formatInt(r.qtd)}</span>
-                </li>
-              ))}
-            </ul>
-            {d.invoiceBad > 0 && (
-              <p className="text-xs text-muted-foreground">
-                {formatPct(d.invoiceBad / Math.max(1, d.invoiceTotal), 1)} das notas tiveram emissão ou cancelamento negado.
-              </p>
-            )}
-          </div>
+          )}
         </Panel>
       </div>
     </IuliShell>

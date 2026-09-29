@@ -104,27 +104,30 @@ export function oldestFetch(map: Map<string, IuliSnapshot> | undefined, keys: st
 }
 
 /**
- * "Atualizar agora": roda sync-iuli até não sobrar consulta vencida (ou até 4
- * rodadas — cada uma tem ~100s de orçamento; o cron continua o resto).
+ * "Atualizar agora": pra cada empresa, relê as janelas recentes (vendas,
+ * títulos, notas, assinaturas — sync-iuli-records com force_recent) e depois os
+ * totais oficiais (sync-iuli, usados na conferência e em Cadastros). Uma
+ * empresa por vez; cada chamada tem ~100s de orçamento.
  */
-export function useIuliRefresh(workspaceId: string | undefined, integrationId: string | undefined) {
+export function useIuliRefresh(workspaceId: string | undefined, integrationIds: string[]) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      let total = 0;
-      for (let round = 0; round < 4; round++) {
-        const { data, error } = await supabase.functions.invoke("sync-iuli", { body: { integration_id: integrationId } });
-        if (error) throw error;
-        if (data?.error) throw new Error(data.error);
-        // locked_until num "busy" é só a trava de outra execução em andamento; pausa de verdade vem em paused_until.
-        if (data?.busy) return { refreshed: total, busy: true, remaining: null as number | null, pausedUntil: null as string | null };
-        if (data?.paused_until) return { refreshed: total + (data.refreshed ?? 0), busy: false, remaining: data.remaining as number, pausedUntil: data.paused_until as string };
-        total += data?.refreshed ?? 0;
-        await queryClient.invalidateQueries({ queryKey: ["iuli", "snapshots", workspaceId] });
-        if (!data?.remaining) return { refreshed: total, busy: false, remaining: 0, pausedUntil: null };
-        if (round === 3) return { refreshed: total, busy: false, remaining: data.remaining as number, pausedUntil: null };
+      let busy = false;
+      let pausedUntil: string | null = null;
+      for (const id of integrationIds) {
+        for (const [fn, body] of [
+          ["sync-iuli-records", { integration_id: id, force_recent: true }],
+          ["sync-iuli", { integration_id: id }],
+        ] as const) {
+          const { data, error } = await supabase.functions.invoke(fn, { body });
+          if (error) throw error;
+          if (data?.error) throw new Error(data.error);
+          if (data?.busy) busy = true;
+          if (data?.paused_until) pausedUntil = data.paused_until;
+        }
       }
-      return { refreshed: total, busy: false, remaining: null, pausedUntil: null };
+      return { busy, pausedUntil };
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["iuli"] });
