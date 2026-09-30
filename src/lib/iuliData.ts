@@ -464,3 +464,59 @@ export function bucketLabel(iso: string, grain: "day" | "week" | "month") {
   if (grain === "month") return `${MONTHS[Number(m) - 1]}/${y.slice(2)}`;
   return `${d}/${m}`;
 }
+
+// ---------------------------------------------------------------------------
+// Notas negadas sem data — a IULI não grava criada_em nelas. Lista: as 100 mais
+// recentes de cada empresa (limite da IULI), com a data da venda vinculada.
+// Contagem exata: por_status do snapshot invoices:all (todo o histórico).
+// ---------------------------------------------------------------------------
+
+export interface UndatedDenied {
+  iuli_id: number;
+  empresa: string | null;
+  valor: number;
+  status: string;
+  detalhe_status: string | null;
+  venda_id: number | null;
+  venda_em: string | null;
+  cliente: string | null;
+}
+
+export function useUndatedDenied(ws: string | undefined, f: Pick<IuliFilters, "empresa">) {
+  return useQuery({
+    queryKey: ["iuli", "undated_denied", ws, f.empresa],
+    enabled: !!ws,
+    queryFn: async () => {
+      let q = supabase
+        .from("iuli_invoices_undated_v")
+        .select("iuli_id, empresa, valor, status, detalhe_status, venda_id, venda_em, cliente")
+        .eq("workspace_id", ws!)
+        .order("venda_em", { ascending: false, nullsFirst: false })
+        .limit(300);
+      const ids = scopeIds(f);
+      if (ids) q = q.in("integration_id", ids);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []).map((r) => ({ ...r, valor: n(r.valor) })) as UndatedDenied[];
+    },
+  });
+}
+
+/** Negadas no histórico inteiro, por empresa (contagem exata informada pela IULI). */
+export function useDeniedTotals(ws: string | undefined, f: Pick<IuliFilters, "empresa">) {
+  return useQuery({
+    queryKey: ["iuli", "denied_totals", ws, f.empresa],
+    enabled: !!ws,
+    queryFn: async () => {
+      let q = supabase.from("iuli_snapshots").select("integration_id, payload").eq("workspace_id", ws!).eq("key", "invoices:all");
+      const ids = scopeIds(f);
+      if (ids) q = q.in("integration_id", ids);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []).map((r) => ({
+        integrationId: r.integration_id as string,
+        negadas: ((r.payload?.por_status ?? []) as { status: string; qtd: number }[]).filter((s) => s.status === "negada").reduce((a, s) => a + n(s.qtd), 0),
+      }));
+    },
+  });
+}

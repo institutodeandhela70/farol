@@ -22,6 +22,7 @@ import {
 // camadas pelo que muda de verdade:
 //
 //   a cada hora  *:recent            janela de 90 dias (venda nova, status recente, baixa recente)
+//   a cada 6h    invoices:undated    as 100 negadas mais recentes (a IULI não grava data nelas)
 //                subscriptions:full  todas as assinaturas (são poucas)
 //                conciliation:recent log de conciliação da IULI → títulos que receberam baixa
 //   1x por dia   receivables:pending todos os títulos sem baixa, de qualquer data
@@ -209,13 +210,29 @@ function offsetStep(tool: string, table: Table, map: (i: Row) => Row, extraArgs:
 }
 
 /**
- * Notas: list_invoices não pagina (devolve no máximo 100 por consulta), então
- * anda por janelas de datas pela criação da nota. O tamanho da janela se ajusta
- * ao volume (mira ~70 notas por consulta): janela que bate 100 é refeita menor;
- * janela vazia ou fraca faz a próxima crescer (até 60 dias).
+ * Notas: list_invoices não pagina (devolve no máximo 100 por consulta) e o
+ * filtro de data só aceita o dia inteiro. O Farol anda por janelas de datas
+ * pela criação da nota, com tamanho ajustado ao volume (mira ~70 por consulta).
+ *
+ * Corte detectado pelo por_status (contagem exata da janela) > itens recebidos:
+ * janela de vários dias é refeita menor; um dia só que ainda passa de 100 é dia
+ * de emissão em lote (ex: 255 notas em 18s) — aí o Farol guarda a contagem
+ * exata do dia em iuli_invoice_day_counts e busca à parte, por status, as
+ * notas não autorizadas (negadas, canceladas…), que são as que importam item a
+ * item. Das autorizadas desses dias ficam só as 100 que a IULI devolve.
  */
 const INVOICES_TARGET = 70;
 const INVOICES_MAX_SPAN = 60;
+
+// Status do por_status → valor aceito no filtro status de list_invoices.
+const INVOICE_STATUS_FILTER: Record<string, string> = {
+  negada: "negada",
+  cancelamento_negado: "negada",
+  cancelada: "cancelada",
+  solicitando_cancelamento: "cancelada",
+  processando: "processando",
+  externa: "externa",
+};
 
 async function invoicesWindowStep(ctx: Ctx, cursor: Cursor): Promise<StepResult> {
   const from = String(cursor.from);
@@ -225,15 +242,41 @@ async function invoicesWindowStep(ctx: Ctx, cursor: Cursor): Promise<StepResult>
 
   for (;;) {
     const to = addDays(from, span - 1) < until ? addDays(from, span - 1) : until;
-    const items: Row[] = (await ctx.call("list_invoices", { start_date: from, end_date: to, limit: PAGE }))?.itens ?? [];
-    if (items.length >= PAGE && span > 1) {
+    const page = await ctx.call("list_invoices", { start_date: from, end_date: to, limit: PAGE });
+    let items: Row[] = page?.itens ?? [];
+    const porStatus: { status: string; qtd: number }[] = page?.por_status ?? [];
+    const exact = porStatus.reduce((a, r) => a + Number(r.qtd ?? 0), 0);
+    const truncated = exact > items.length || (!porStatus.length && items.length >= PAGE);
+
+    if (truncated && span > 1) {
       span = Math.max(1, Math.floor(span / 2)); // estourou: refaz a mesma janela menor
       continue;
     }
-    if (items.length >= PAGE) warning = `notas de ${from} passaram de ${PAGE} — só as ${PAGE} primeiras foram trazidas`;
+
+    if (truncated) {
+      // Dia de emissão em lote: contagem exata + não autorizadas item a item.
+      await ctx.admin.from("iuli_invoice_day_counts").delete().eq("integration_id", ctx.integrationId).eq("dia", from);
+      if (porStatus.length) {
+        await ctx.admin.from("iuli_invoice_day_counts").insert(
+          porStatus.map((r) => ({
+            integration_id: ctx.integrationId,
+            workspace_id: ctx.workspaceId,
+            dia: from,
+            status: r.status,
+            qtd: Number(r.qtd ?? 0),
+          })),
+        );
+      }
+      const filters = new Set(porStatus.filter((r) => r.status !== "autorizada" && Number(r.qtd) > 0).map((r) => INVOICE_STATUS_FILTER[r.status]).filter(Boolean));
+      for (const status of filters) {
+        const extra: Row[] = (await ctx.call("list_invoices", { start_date: from, end_date: from, status, limit: PAGE }))?.itens ?? [];
+        if (extra.length >= PAGE) warning = `notas ${status} de ${from} passaram de ${PAGE} — só as ${PAGE} primeiras foram trazidas`;
+        items = items.concat(extra);
+      }
+    }
 
     const nextFrom = addDays(to, 1);
-    const nextSpan = Math.min(INVOICES_MAX_SPAN, Math.max(1, Math.floor((span * INVOICES_TARGET) / Math.max(items.length, 1))));
+    const nextSpan = Math.min(INVOICES_MAX_SPAN, Math.max(1, Math.floor((span * INVOICES_TARGET) / Math.max(exact || items.length, 1))));
     return {
       rows: items.map(invoiceRow),
       table: "iuli_invoices",
@@ -248,12 +291,14 @@ async function invoicesWindowStep(ctx: Ctx, cursor: Cursor): Promise<StepResult>
 // não aparecer mais. task = "repair:<tabela>:<de>:<até>"
 // ---------------------------------------------------------------------------
 
+type RepairTable = "iuli_sales" | "iuli_receivables" | "iuli_invoices";
+
 const REPAIR_TOOL: Record<"iuli_sales" | "iuli_receivables", { tool: string; map: (i: Row) => Row; args: Record<string, unknown> }> = {
   iuli_sales: { tool: "list_sales", map: saleRow, args: {} },
   iuli_receivables: { tool: "get_accounts_receivable", map: receivableRow, args: { status: "all" } },
 };
 
-async function enqueueRepair(ctx: Ctx, table: "iuli_sales" | "iuli_receivables", from: string, to: string, markRemovedBefore: string | null) {
+async function enqueueRepair(ctx: Ctx, table: RepairTable, from: string, to: string, markRemovedBefore: string | null) {
   const task = `repair:${table}:${from}:${to}`;
   // ignoreDuplicates: se já tem o mesmo reparo na fila, mantém o que está lá.
   await ctx.admin.from("iuli_sync_state").upsert(
@@ -271,6 +316,20 @@ async function enqueueRepair(ctx: Ctx, table: "iuli_sales" | "iuli_receivables",
 
 function repairTaskDef(task: string): TaskDef | null {
   const [, table, from, to] = task.split(":");
+  if (table === "iuli_invoices" && from && to) {
+    // Notas: relê as janelas do intervalo (inclui o tratamento de dia em lote).
+    return {
+      task,
+      tool: "list_invoices",
+      every: 0,
+      tier: 1,
+      init: () => ({ from, until: to, span: 1 }),
+      step: (ctx, c) => invoicesWindowStep(ctx, { ...c, from: c.from ?? from, until: c.until ?? to, span: c.span ?? 1 }),
+      onComplete: async (ctx) => {
+        await ctx.admin.from("iuli_sync_state").delete().eq("integration_id", ctx.integrationId).eq("task", task);
+      },
+    };
+  }
   const def = REPAIR_TOOL[table as keyof typeof REPAIR_TOOL];
   if (!def || !from || !to) return null;
   return {
@@ -391,6 +450,21 @@ const TASKS: TaskDef[] = [
       return { rows: [], next: null };
     },
   },
+  {
+    // Negadas sem data: a IULI não grava criada_em nelas, então a busca por
+    // janela de data nunca as encontra. Sem data, a IULI devolve as 100 mais
+    // recentes (não pagina) — guardamos essas; a contagem exata vem do
+    // snapshot invoices:all (sync-iuli).
+    task: "invoices:undated",
+    tool: "list_invoices",
+    every: 6 * HOUR,
+    tier: 0,
+    init: () => ({}),
+    step: async (ctx) => {
+      const page = await ctx.call("list_invoices", { status: "negada", limit: PAGE });
+      return { rows: (page?.itens ?? []).map(invoiceRow), table: "iuli_invoices", next: null };
+    },
+  },
   // --- 1x por dia ---
   {
     task: "receivables:pending",
@@ -480,11 +554,12 @@ async function runConsistency(ctx: Ctx, state: Map<string, Row>) {
       }
       continue;
     }
-    const table = m.scope === "sales" ? "iuli_sales" : "iuli_receivables";
+    const table: RepairTable = m.scope === "sales" ? "iuli_sales" : m.scope === "invoices" ? "iuli_invoices" : "iuli_receivables";
     const key = `${table}:${m.period}`;
     if (recent(key)) continue;
     const { from, to } = monthBounds(String(m.period));
-    await enqueueRepair(ctx, table, from, to, new Date().toISOString());
+    // Notas não marcam removido (a releitura pode vir cortada pela própria IULI).
+    await enqueueRepair(ctx, table, from, to, table === "iuli_invoices" ? null : new Date().toISOString());
     repaired[key] = new Date().toISOString();
     created++;
   }

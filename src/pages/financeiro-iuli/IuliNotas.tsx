@@ -1,11 +1,21 @@
 import { useMemo } from "react";
 import { useWorkspace } from "@/hooks/WorkspaceProvider";
 import { delta, formatBRL, formatInt, formatPct } from "@/lib/commercial";
-import { companyHasTool, formatDateTime, INVOICE_STATUS, invoiceLabel, useIuliCompanies } from "@/lib/iuli";
-import { bucketLabel, bucketsBetween, sumBy, useInvoicesAgg, useInvoicesList, useSalesAgg, type InvoiceAggRow } from "@/lib/iuliData";
+import { companyHasTool, formatDate, formatDateTime, INVOICE_STATUS, invoiceLabel, useIuliCompanies } from "@/lib/iuli";
+import {
+  bucketLabel,
+  bucketsBetween,
+  sumBy,
+  useDeniedTotals,
+  useInvoicesAgg,
+  useInvoicesList,
+  useSalesAgg,
+  useUndatedDenied,
+  type InvoiceAggRow,
+} from "@/lib/iuliData";
 import { periodText, previousRange, useIuliFilters } from "@/lib/iuliFilters";
 import { IULI_SOURCES as S } from "@/lib/iuliSources";
-import { EmptyState, KpiCard, LoadingBlock, Panel, WarnNote } from "@/components/commercial/CommercialUI";
+import { BarList, EmptyState, KpiCard, LoadingBlock, Panel, WarnNote } from "@/components/commercial/CommercialUI";
 import { GroupedMonthChart, IuliShell, StackedMonthChart, StatusPill } from "@/components/iuli/IuliUI";
 import { TONE } from "@/components/iuli/iuliTheme";
 import { ClearFilters, CompanyFilter, OptionFilter, PeriodFilter } from "@/components/iuli/IuliFilterBar";
@@ -29,6 +39,8 @@ export default function IuliNotas() {
   // Vendas efetivas no mesmo recorte (sem filtros de venda) — pra comparar com notas autorizadas.
   const sales = useSalesAgg(ws, { ...filters, cliente: null, status: null, produto: null, origem: null }, { grain: true });
   const denied = useInvoicesList(ws, filters, BAD, 30);
+  const undated = useUndatedDenied(ws, filters);
+  const deniedTotals = useDeniedTotals(ws, filters);
 
   const k = useMemo(() => {
     const c = (rows: InvoiceAggRow[] | undefined, statuses?: string[]) => sumBy(rows, (r) => r.qtd, (r) => !statuses || statuses.includes(r.status));
@@ -43,7 +55,6 @@ export default function IuliNotas() {
       total: c(agg.data),
       totalPrev: c(aggPrev.data),
       autorizadas: c(agg.data, ["autorizada"]),
-      valorAutorizado: sumBy(agg.data, (r) => r.total, (r) => r.status === "autorizada"),
       negadas: c(agg.data, BAD),
       canceladas: c(agg.data, CANCEL),
       byStatus: [...byStatus.entries()].sort((a, b) => b[1].qtd - a[1].qtd),
@@ -70,6 +81,18 @@ export default function IuliNotas() {
   }, [series.data, sales.data, filters.from, filters.to, filters.grain]);
 
   const allWithout = inScope.length > 0 && withoutTool.length === inScope.length;
+
+  // Negadas sem data: contagem exata (IULI) + amostra das mais recentes com motivo.
+  const undatedTotal = sumBy(deniedTotals.data, (r) => r.negadas);
+  const undatedItems = useMemo(() => (undated.data ?? []).filter((n) => n.status === "negada"), [undated.data]);
+  const reasons = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const n of undatedItems) {
+      const key = (n.detalhe_status ?? "Sem mensagem de erro").trim().split("\n")[0].slice(0, 140);
+      map.set(key, (map.get(key) ?? 0) + 1);
+    }
+    return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+  }, [undatedItems]);
   const grainText = filters.grain === "day" ? "por dia" : filters.grain === "week" ? "por semana" : "por mês";
 
   return (
@@ -104,12 +127,12 @@ export default function IuliNotas() {
         <>
           <section aria-label="Indicadores" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <KpiCard info={S.invoicesStatus()} label="Notas emitidas" value={formatInt(k.total)} change={delta(k.total, k.totalPrev)} sub="vs período anterior" loading={agg.isLoading} />
-            <KpiCard info={S.invoicesStatus()} label="Autorizadas" value={formatInt(k.autorizadas)} sub={formatBRL(k.valorAutorizado)} loading={agg.isLoading} />
+            <KpiCard info={S.invoicesStatus()} label="Autorizadas" value={formatInt(k.autorizadas)} sub={`${formatPct(k.total ? k.autorizadas / k.total : null, 1)} das emitidas`} loading={agg.isLoading} />
             <KpiCard
               info={S.invoicesStatus()}
-              label="Negadas"
+              label="Negadas no período"
               value={formatInt(k.negadas)}
-              sub={`${formatPct(k.total ? k.negadas / k.total : null, 1)} · emissão ou cancelamento`}
+              sub={undatedTotal ? `+ ${formatInt(undatedTotal)} negadas sem data (abaixo)` : `${formatPct(k.total ? k.negadas / k.total : null, 1)} · emissão ou cancelamento`}
               tone={k.total && k.negadas / k.total > 0.05 ? "warn" : "default"}
               loading={agg.isLoading}
             />
@@ -158,7 +181,7 @@ export default function IuliNotas() {
                     <li key={status} className="flex items-center justify-between gap-2 text-sm">
                       <StatusPill tone={INVOICE_STATUS[status]?.tone ?? "neutral"}>{invoiceLabel(status)}</StatusPill>
                       <span className="tabular-nums">
-                        {formatInt(v.qtd)} · <span className="font-semibold">{formatBRL(v.total)}</span>
+                        <span className="font-semibold">{formatInt(v.qtd)}</span>
                       </span>
                     </li>
                   ))}
@@ -194,6 +217,68 @@ export default function IuliNotas() {
               )}
             </Panel>
           </div>
+          <Panel
+            title="Notas negadas sem data na IULI"
+            info={S.invoicesUndated()}
+            action={<span className="text-sm text-muted-foreground">Todo o histórico · fora dos gráficos do período</span>}
+          >
+            {deniedTotals.isLoading || undated.isLoading ? (
+              <LoadingBlock />
+            ) : !undatedTotal ? (
+              <EmptyState>Nenhuma nota negada.</EmptyState>
+            ) : (
+              <div className="flex flex-col gap-5">
+                <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+                  <span className="text-2xl font-semibold tabular-nums">{formatInt(undatedTotal)}</span>
+                  <span className="text-sm text-muted-foreground">
+                    notas negadas no histórico (contagem exata da IULI)
+                    {filters.empresa === "todas" &&
+                      (deniedTotals.data?.length ?? 0) > 1 &&
+                      ` · ${deniedTotals.data!.map((r) => `${companies.find((c) => c.id === r.integrationId)?.label ?? "Empresa"}: ${formatInt(r.negadas)}`).join(" · ")}`}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 gap-6 xl:grid-cols-5">
+                  <div className="flex flex-col gap-3 xl:col-span-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Motivos mais comuns · nas {formatInt(undatedItems.length)} mais recentes
+                    </span>
+                    {reasons.length ? (
+                      <BarList tone="blue" items={reasons.map(([motivo, qtd]) => ({ key: motivo, label: motivo, value: qtd, display: formatInt(qtd) }))} />
+                    ) : (
+                      <EmptyState>Sem detalhes disponíveis.</EmptyState>
+                    )}
+                  </div>
+                  <div className="-mx-4 max-h-[28rem] overflow-auto md:mx-0 xl:col-span-3">
+                    <table className="w-full min-w-[560px] text-sm">
+                      <thead className="sticky top-0 bg-card text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <tr className="border-b border-border">
+                          <th className="px-4 py-2 font-medium md:pl-0">Venda em</th>
+                          <th className="px-3 py-2 font-medium">Cliente</th>
+                          <th className="px-3 py-2 font-medium">Motivo</th>
+                          {filters.empresa === "todas" && <th className="px-3 py-2 font-medium">Empresa</th>}
+                          <th className="px-4 py-2 text-right font-medium md:pr-0">Valor</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {undatedItems.map((n) => (
+                          <tr key={`${n.empresa}-${n.iuli_id}`} className="border-b border-border/60 align-top last:border-0">
+                            <td className="whitespace-nowrap px-4 py-2.5 tabular-nums md:pl-0">{n.venda_em ? formatDate(n.venda_em) : "—"}</td>
+                            <td className="max-w-40 truncate px-3 py-2.5 font-medium">{n.cliente ?? "—"}</td>
+                            <td className="max-w-72 px-3 py-2.5 text-muted-foreground">
+                              <span className="line-clamp-2">{n.detalhe_status?.trim() || "Sem mensagem de erro."}</span>
+                            </td>
+                            {filters.empresa === "todas" && <td className="px-3 py-2.5 text-muted-foreground">{n.empresa}</td>}
+                            <td className="px-4 py-2.5 text-right font-semibold tabular-nums md:pr-0">{formatBRL(n.valor)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </Panel>
         </>
       )}
     </IuliShell>

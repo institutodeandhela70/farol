@@ -172,8 +172,8 @@ export const IULI_SOURCES = {
   invoicesStatus: (): DataSource => ({
     title: "Notas fiscais",
     fields: [f("list_invoices", "itens[].status", "Status"), f("list_invoices", "itens[].valor", "Valor"), f("list_invoices", "itens[].criada_em", "Criada em")],
-    rule: "Notas emitidas pela IULI com data de criação no período, por status. \"Negadas\" soma negada e cancelamento negado.",
-    note: SYNC_NOTE,
+    rule: "Quantidade de notas emitidas pela IULI com data de criação no período, por status. \"Negadas\" soma negada e cancelamento negado.",
+    note: "A IULI devolve no máximo 100 notas por consulta e só filtra por dia inteiro. Em dias de emissão em lote (ex: 255 notas em segundos), o Farol usa a contagem exata que a própria IULI informa por status e baixa à parte todas as notas não autorizadas; das autorizadas desses dias só vêm 100 itens — por isso a tela mostra quantidade, não valor.",
   }),
   invoicesMonthly: (): DataSource => ({
     title: "Notas no período",
@@ -184,6 +184,17 @@ export const IULI_SOURCES = {
     title: "Notas negadas — motivo",
     fields: [f("list_invoices", "itens[].numero", "Número"), f("list_invoices", "itens[].detalhe_status", "Motivo da prefeitura/SEFAZ"), f("list_invoices", "itens[].valor", "Valor")],
     rule: "As 30 notas mais recentes do período com status negada ou cancelamento negado, com a mensagem de erro que a IULI recebeu.",
+  }),
+  invoicesUndated: (): DataSource => ({
+    title: "Notas negadas sem data",
+    fields: [
+      f("list_invoices", "por_status[negada].qtd", "Quantidade de negadas (histórico)"),
+      f("list_invoices", "itens[].detalhe_status", "Motivo da prefeitura/SEFAZ"),
+      f("list_invoices", "itens[].venda_id", "Venda vinculada"),
+      SALE.competencia,
+    ],
+    rule: "A IULI não grava a data de criação nas notas negadas, então elas não entram nos gráficos por período. O total é a contagem exata que a IULI informa pro histórico inteiro; a lista e os motivos são das mais recentes (a IULI devolve no máximo 100 por empresa, sem paginação). A data mostrada é a da venda vinculada à nota.",
+    note: "Os motivos mais comuns são calculados sobre essa amostra das mais recentes, não sobre o total.",
   }),
   invoiceCoverage: (): DataSource => ({
     title: "Vendas efetivas × notas autorizadas",
