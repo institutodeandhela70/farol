@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
@@ -33,6 +33,47 @@ export function monthStartISO(ym: string): string {
 
 export function monthEndISO(ym: string): string {
   return new Date(new Date(`${addMonths(ym, 1)}-01T00:00:00-03:00`).getTime() - 1).toISOString();
+}
+
+/** Quantos dias tem o mês (considerando ano bissexto). */
+export function daysInMonth(ym: string): number {
+  const [y, m] = ym.split("-").map(Number);
+  return new Date(y, m, 0).getDate();
+}
+
+export function daysOfMonth(ym: string): string[] {
+  const total = daysInMonth(ym);
+  return Array.from({ length: total }, (_, i) => `${ym}-${String(i + 1).padStart(2, "0")}`);
+}
+
+export function dayLabel(isoDay: string): string {
+  const [, , d] = isoDay.split("-");
+  return String(Number(d));
+}
+
+export function dayStartISO(day: string): string {
+  return new Date(`${day}T00:00:00-03:00`).toISOString();
+}
+
+export function dayEndISO(day: string): string {
+  return new Date(new Date(`${day}T00:00:00-03:00`).getTime() + 24 * 60 * 60 * 1000 - 1).toISOString();
+}
+
+export function addDays(day: string, n: number): string {
+  const [y, m, d] = day.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + n));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+}
+
+export function daysBetween(from: string, to: string): string[] {
+  const out: string[] = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) out.push(d);
+  return out;
+}
+
+export function dayLabelLong(isoDay: string): string {
+  const [y, m, d] = isoDay.split("-").map(Number);
+  return `${String(d).padStart(2, "0")}/${MONTH_SHORT[m - 1]}/${String(y).slice(2)}`;
 }
 
 const MONTH_SHORT = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
@@ -94,41 +135,127 @@ export type DateBasis = "created" | "meeting";
 export interface CommercialFilters {
   from: string;
   to: string;
+  /** Recorte exato por dia (opcional) — quando presente, tem prioridade sobre from/to (mês) para consultas. from/to continuam refletindo os meses que o recorte cobre. */
+  fromDay: string | null;
+  toDay: string | null;
   owner: string | null;
   pipelines: string[] | null;
   attribution: Attribution;
   activityTypes: string[] | null;
 }
 
+// Persistência entre telas: o filtro fica na URL (pra um link já abrir filtrado),
+// mas também salva no localStorage — assim, ao navegar pra outra tela do Comercial
+// por um link "seco" (sem querystring, ex.: menu lateral), o filtro anterior volta
+// sozinho em vez de resetar pro padrão. Se a URL já tem algum parâmetro de filtro
+// explícito, ela manda (link compartilhado/bookmarkado vale mais que o que tava salvo).
+const STORAGE_KEY = "farol.comercial.filters";
+
+interface StoredFilters {
+  from?: string;
+  to?: string;
+  fromDay?: string | null;
+  toDay?: string | null;
+  owner?: string | null;
+  pipelines?: string[] | null;
+  attribution?: Attribution;
+  activityTypes?: string[] | null;
+}
+
+function readStoredFilters(): StoredFilters {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredFilters(f: StoredFilters) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(f));
+  } catch {
+    // localStorage indisponível (modo privado, quota, etc.) — segue sem persistir.
+  }
+}
+
+const FILTER_PARAM_KEYS = ["de", "ate", "deDia", "ateDia", "vendedor", "pipelines", "atrib", "tipos"];
+
 export function useCommercialFilters() {
   const [params, setParams] = useSearchParams();
+  const hasAnyParam = FILTER_PARAM_KEYS.some((k) => params.has(k));
 
   const filters = useMemo<CommercialFilters>(() => {
+    const stored = hasAnyParam ? {} : readStoredFilters();
     const now = currentYM();
-    const from = params.get("de") ?? now;
-    const to = params.get("ate") ?? from;
-    const list = (key: string) => {
+    const from = params.get("de") ?? stored.from ?? now;
+    const to = params.get("ate") ?? stored.to ?? from;
+    const fromDay = params.get("deDia") ?? stored.fromDay ?? null;
+    const toDay = params.get("ateDia") ?? stored.toDay ?? null;
+    const list = (key: string, storedVal: string[] | null | undefined) => {
       const v = params.get(key);
-      return v ? v.split(",").filter(Boolean) : null;
+      if (v) return v.split(",").filter(Boolean);
+      return hasAnyParam ? null : (storedVal ?? null);
     };
     return {
       from: from <= to ? from : to,
       to: from <= to ? to : from,
-      owner: params.get("vendedor"),
-      pipelines: list("pipelines"),
-      attribution: params.get("atrib") === "closer" ? "closer" : "owner",
-      activityTypes: list("tipos"),
+      fromDay: fromDay && toDay ? (fromDay <= toDay ? fromDay : toDay) : null,
+      toDay: fromDay && toDay ? (fromDay <= toDay ? toDay : fromDay) : null,
+      owner: params.get("vendedor") ?? (hasAnyParam ? null : (stored.owner ?? null)),
+      pipelines: list("pipelines", stored.pipelines),
+      attribution: (params.get("atrib") === "closer" ? "closer" : hasAnyParam ? "owner" : (stored.attribution ?? "owner")),
+      activityTypes: list("tipos", stored.activityTypes),
     };
-  }, [params]);
+  }, [params, hasAnyParam]);
+
+  // Na primeira carga de uma tela sem nenhum parâmetro na URL, reflete o que veio
+  // do localStorage na barra de endereço — mantém URL e estado salvo consistentes.
+  useEffect(() => {
+    if (hasAnyParam) return;
+    const stored = readStoredFilters();
+    const hasStored = stored.from || stored.owner || stored.pipelines?.length || stored.attribution || stored.activityTypes?.length;
+    if (!hasStored) return;
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (stored.from) next.set("de", stored.from);
+        if (stored.to) next.set("ate", stored.to);
+        if (stored.fromDay) next.set("deDia", stored.fromDay);
+        if (stored.toDay) next.set("ateDia", stored.toDay);
+        if (stored.owner) next.set("vendedor", stored.owner);
+        if (stored.pipelines?.length) next.set("pipelines", stored.pipelines.join(","));
+        if (stored.attribution === "closer") next.set("atrib", "closer");
+        if (stored.activityTypes?.length) next.set("tipos", stored.activityTypes.join(","));
+        return next;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const setFilters = useCallback(
     (patch: Partial<CommercialFilters>) => {
+      const merged: StoredFilters = {
+        from: patch.from ?? filters.from,
+        to: patch.to ?? filters.to,
+        fromDay: "fromDay" in patch ? patch.fromDay : filters.fromDay,
+        toDay: "toDay" in patch ? patch.toDay : filters.toDay,
+        owner: "owner" in patch ? patch.owner : filters.owner,
+        pipelines: "pipelines" in patch ? patch.pipelines : filters.pipelines,
+        attribution: patch.attribution ?? filters.attribution,
+        activityTypes: "activityTypes" in patch ? patch.activityTypes : filters.activityTypes,
+      };
+      writeStoredFilters(merged);
+
       setParams(
         (prev) => {
           const next = new URLSearchParams(prev);
           const put = (key: string, value: string | null) => (value ? next.set(key, value) : next.delete(key));
           if ("from" in patch) put("de", patch.from ?? null);
           if ("to" in patch) put("ate", patch.to ?? null);
+          if ("fromDay" in patch) put("deDia", patch.fromDay ?? null);
+          if ("toDay" in patch) put("ateDia", patch.toDay ?? null);
           if ("owner" in patch) put("vendedor", patch.owner ?? null);
           if ("pipelines" in patch) put("pipelines", patch.pipelines?.length ? patch.pipelines.join(",") : null);
           if ("attribution" in patch) put("atrib", patch.attribution === "closer" ? "closer" : null);
@@ -138,10 +265,19 @@ export function useCommercialFilters() {
         { replace: true },
       );
     },
-    [setParams],
+    [setParams, filters],
   );
 
   return { filters, setFilters };
+}
+
+/** Início do período em ISO — usa o recorte por dia quando presente, senão o mês inteiro. */
+export function periodStartISO(f: Pick<CommercialFilters, "from" | "fromDay">): string {
+  return f.fromDay ? dayStartISO(f.fromDay) : monthStartISO(f.from);
+}
+
+export function periodEndISO(f: Pick<CommercialFilters, "to" | "toDay">): string {
+  return f.toDay ? dayEndISO(f.toDay) : monthEndISO(f.to);
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +323,84 @@ export function useClosing(workspaceId: string | undefined, from: string, to: st
         }),
         ["won_count", "won_amount", "lost_count", "lost_amount"],
       ).map((r) => ({ ...r, month: ymOf(r.month) })),
+  });
+}
+
+export interface DailyClosingRow {
+  day: string;
+  owner_id: string;
+  won_count: number;
+  won_amount: number;
+  lost_count: number;
+  lost_amount: number;
+}
+
+/** Fechamento dia a dia entre duas datas exatas (usado no gráfico "Fechamento diário"). */
+export function useDailyClosing(workspaceId: string | undefined, startISO: string, endISO: string, f: Pick<CommercialFilters, "attribution" | "pipelines">) {
+  return useQuery({
+    queryKey: ["commercial", "daily-closing", workspaceId, startISO, endISO, f.attribution, f.pipelines],
+    enabled: !!workspaceId,
+    queryFn: async () =>
+      num(
+        await rpc<DailyClosingRow>("commercial_daily_closing", {
+          p_workspace_id: workspaceId,
+          p_start_date: startISO,
+          p_end_date: endISO,
+          p_attribution: f.attribution,
+          p_pipeline_ids: f.pipelines,
+        }),
+        ["won_count", "won_amount", "lost_count", "lost_amount"],
+      ),
+  });
+}
+
+/** Fechamento agregado (com detalhe por dono) para um intervalo exato — usado pros KPIs
+ * do período atual/anterior quando um recorte por dia está ativo. Mesma RPC de useClosing,
+ * mas recebe as datas já prontas em vez de derivar de um mês. */
+export function useClosingRange(workspaceId: string | undefined, startISO: string, endISO: string, f: Pick<CommercialFilters, "attribution" | "pipelines">) {
+  return useQuery({
+    queryKey: ["commercial", "closing-range", workspaceId, startISO, endISO, f.attribution, f.pipelines],
+    enabled: !!workspaceId,
+    queryFn: async () =>
+      num(
+        await rpc<ClosingRow>("commercial_monthly_closing", {
+          p_workspace_id: workspaceId,
+          p_start_date: startISO,
+          p_end_date: endISO,
+          p_attribution: f.attribution,
+          p_pipeline_ids: f.pipelines,
+        }),
+        ["won_count", "won_amount", "lost_count", "lost_amount"],
+      ).map((r) => ({ ...r, month: ymOf(r.month) })),
+  });
+}
+
+export interface CustomerRow {
+  contact_id: string;
+  customer_name: string;
+  customer_email: string | null;
+  owner_id: string;
+  produto: string;
+  deal_count: number;
+  total_amount: number;
+}
+
+/** "Visão por cliente": quanto cada cliente pagou e o que comprou, no período. */
+export function useCustomers(workspaceId: string | undefined, startISO: string, endISO: string, f: Pick<CommercialFilters, "attribution" | "pipelines">) {
+  return useQuery({
+    queryKey: ["commercial", "customers", workspaceId, startISO, endISO, f.attribution, f.pipelines],
+    enabled: !!workspaceId,
+    queryFn: async () =>
+      num(
+        await rpc<CustomerRow>("commercial_customers", {
+          p_workspace_id: workspaceId,
+          p_start_date: startISO,
+          p_end_date: endISO,
+          p_attribution: f.attribution,
+          p_pipeline_ids: f.pipelines,
+        }),
+        ["deal_count", "total_amount"],
+      ),
   });
 }
 
@@ -239,14 +453,14 @@ export interface ConductorRow extends MeetingOutcomeCounts {
 
 export function useMeetingsByConductor(workspaceId: string | undefined, f: CommercialFilters) {
   return useQuery({
-    queryKey: ["commercial", "conductor", workspaceId, f.from, f.to, f.activityTypes],
+    queryKey: ["commercial", "conductor", workspaceId, f.from, f.to, f.fromDay, f.toDay, f.activityTypes],
     enabled: !!workspaceId,
     queryFn: async () =>
       num(
         await rpc<ConductorRow>("commercial_meetings_by_conductor", {
           p_workspace_id: workspaceId,
-          p_start_date: monthStartISO(f.from),
-          p_end_date: monthEndISO(f.to),
+          p_start_date: periodStartISO(f),
+          p_end_date: periodEndISO(f),
           p_activity_types: f.activityTypes,
         }),
         OUTCOME_KEYS,
@@ -262,14 +476,14 @@ export interface SchedulerRow extends MeetingOutcomeCounts {
 
 export function useMeetingsByScheduler(workspaceId: string | undefined, f: CommercialFilters, basis: DateBasis) {
   return useQuery({
-    queryKey: ["commercial", "scheduler", workspaceId, f.from, f.to, f.activityTypes, basis],
+    queryKey: ["commercial", "scheduler", workspaceId, f.from, f.to, f.fromDay, f.toDay, f.activityTypes, basis],
     enabled: !!workspaceId,
     queryFn: async () =>
       num(
         await rpc<SchedulerRow>("commercial_meetings_by_scheduler", {
           p_workspace_id: workspaceId,
-          p_start_date: monthStartISO(f.from),
-          p_end_date: monthEndISO(f.to),
+          p_start_date: periodStartISO(f),
+          p_end_date: periodEndISO(f),
           p_date_basis: basis,
           p_activity_types: f.activityTypes,
         }),

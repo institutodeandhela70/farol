@@ -107,29 +107,18 @@ export function useSalesList(ws: string | undefined, f: IuliFilters, limit = 50)
     queryKey: ["iuli", "sales_list", ws, f, limit],
     enabled: !!ws,
     queryFn: async () => {
-      let q = supabase
-        .from("iuli_sales_v")
-        .select("iuli_id, empresa, status, valor_total, dia, cliente, produto, origem", { count: "exact" })
-        .eq("workspace_id", ws!)
-        .gte("dia", f.from)
-        .lte("dia", f.to)
-        .order("valor_total", { ascending: false })
-        .limit(limit);
-      const ids = scopeIds(f);
-      if (ids) q = q.in("integration_id", ids);
-      if (f.cliente) q = q.ilike("cliente", `%${f.cliente}%`);
-      if (f.status) q = q.in("status", f.status);
-      if (f.origem) q = q.in("origem", f.origem);
-      if (f.produto) {
-        const named = f.produto.filter((p) => p !== "(não identificado)");
-        q = f.produto.includes("(não identificado)")
-          ? q.or(`produto.is.null${named.length ? `,produto.in.(${named.map((p) => `"${p}"`).join(",")})` : ""}`)
-          : q.in("produto", named);
-      }
-      if (f.entreEmpresas === "excluir") q = q.eq("entre_empresas", false);
-      const { data, error, count } = await q;
-      if (error) throw error;
-      return { rows: (data ?? []).map((r) => ({ ...r, valor_total: n(r.valor_total) })) as SaleItem[], count: count ?? 0 };
+      const rows = await rpc<SaleItem & { total_count: Num }>("iuli_sales_list", {
+        p_workspace_id: ws,
+        p_integration_ids: scopeIds(f),
+        p_from: f.from,
+        p_to: f.to,
+        ...salesArgs(f),
+        p_limit: limit,
+      });
+      return {
+        rows: rows.map((r) => ({ ...r, valor_total: n(r.valor_total) })) as SaleItem[],
+        count: rows.length ? n(rows[0].total_count) : 0,
+      };
     },
   });
 }

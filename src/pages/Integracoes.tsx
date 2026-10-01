@@ -410,6 +410,36 @@ export default function Integracoes() {
     }
   };
 
+  const [backfillRunning, setBackfillRunning] = useState(false);
+  const [backfillTotal, setBackfillTotal] = useState(0);
+
+  // Preenche negócio↔contato pros negócios que já existiam antes dessa
+  // associação começar a ser sincronizada — one-off, chama em loop até não
+  // sobrar nada (cada chamada só processa ~45s de lotes).
+  const handleBackfillDealContacts = async () => {
+    if (!hubspotIntegration) return;
+    setBackfillRunning(true);
+    setBackfillTotal(0);
+    setHubspotFeedback(null);
+
+    let total = 0;
+    for (let i = 0; i < 200; i++) {
+      const { data, error } = await supabase.functions.invoke("backfill-hubspot-deal-contacts", {
+        body: { integration_id: hubspotIntegration.id },
+      });
+      if (error || data?.error) {
+        setHubspotFeedback({ type: "error", text: data?.error ?? error?.message ?? "Falha no backfill." });
+        break;
+      }
+      total += data?.updated ?? 0;
+      setBackfillTotal(total);
+      if (!data?.updated) break;
+    }
+
+    setBackfillRunning(false);
+    setHubspotFeedback({ type: "success", text: `Vínculo com contatos preenchido em ${total} negócio(s).` });
+  };
+
   // --- TMB ---
   const [tmbIntegration, setTmbIntegration] = useState<IntegrationRow | null>(null);
   const [tmbToken, setTmbToken] = useState("");
@@ -1016,6 +1046,18 @@ export default function Integracoes() {
               <Button variant="outline" onClick={() => handleDiagnoseHubspot()} disabled={hubspotDiagnosing}>
                 {hubspotDiagnosing ? "Consultando..." : "Ver o que a conta HubSpot tem de dados"}
               </Button>
+            )}
+
+            {hubspotIntegration?.status === "connected" && (
+              <div className="flex flex-col gap-1.5 border-t border-border pt-3">
+                <Button variant="outline" onClick={handleBackfillDealContacts} disabled={backfillRunning}>
+                  {backfillRunning ? `Vinculando... (${backfillTotal} até agora)` : "Vincular negócios antigos a contatos (uma vez)"}
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Preenche o vínculo negócio↔contato pros negócios que já existiam antes dessa associação passar a
+                  sincronizar — usado na "Visão por cliente". Pode demorar alguns minutos; só precisa rodar uma vez.
+                </p>
+              </div>
             )}
 
             {hubspotDiagnostics && <DiagnosticsTable diagnostics={hubspotDiagnostics} />}

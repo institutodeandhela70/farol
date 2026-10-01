@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -96,6 +97,36 @@ function DataStatus({ companies, status }: { companies: IuliIntegration[]; statu
   );
 }
 
+/**
+ * Se alguma consulta da tela falhar (ex: tempo esgotado no banco), avisa em vez
+ * de deixar os indicadores zerados parecendo número de verdade.
+ */
+function QueryErrors() {
+  const queryClient = useQueryClient();
+  const cache = queryClient.getQueryCache();
+  const failed = useSyncExternalStore(
+    (onChange) => cache.subscribe(onChange),
+    () => cache.findAll({ queryKey: ["iuli"], type: "active" }).filter((q) => q.state.status === "error").length,
+  );
+  if (!failed) return null;
+  return (
+    <WarnNote>
+      <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span>
+          <strong>{failed === 1 ? "Uma parte da tela não carregou" : `${failed} partes da tela não carregaram`}</strong> — os números zerados abaixo podem estar incompletos.
+        </span>
+        <button
+          type="button"
+          className="font-medium underline"
+          onClick={() => queryClient.refetchQueries({ queryKey: ["iuli"], type: "active" })}
+        >
+          Tentar de novo
+        </button>
+      </span>
+    </WarnNote>
+  );
+}
+
 export function IuliShell({
   title,
   description,
@@ -136,6 +167,7 @@ export function IuliShell({
               {filters}
               <SyncStatus companies={inScope} status={status} />
             </FilterBar>
+            <QueryErrors />
             {!singleCompany && <DataStatus companies={inScope} status={status} />}
           </div>
         )

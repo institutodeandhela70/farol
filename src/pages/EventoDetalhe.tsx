@@ -75,6 +75,7 @@ interface ApplicationRow {
   status: ApplicationStatus;
   hubspot_sync_status: HubspotSyncStatus;
   hubspot_sync_error: string | null;
+  hubspot_deal_id: string | null;
   whatsapp_status: HubspotSyncStatus;
   created_at: string;
 }

@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { usePersistentState } from "@/lib/iuliPersist";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useWorkspace } from "@/hooks/WorkspaceProvider";
 import { delta, formatBRL, formatBRLShort, formatInt, formatPct } from "@/lib/commercial";
@@ -34,7 +35,7 @@ export default function IuliReceber() {
   const ws = workspace?.id;
   const { filters, set } = useIuliFilters();
   const prev = previousRange(filters.from, filters.to);
-  const [order, setOrder] = useState<"due_date" | "valor">("valor");
+  const [order, setOrder] = usePersistentState<"due_date" | "valor">("receber:ordem", "valor");
 
   const flow = useReceivablesFlow(ws, filters);
   const flowPrev = useReceivablesFlow(ws, filters, { range: prev });

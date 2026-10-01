@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { usePersistentState } from "@/lib/iuliPersist";
 import { useWorkspace } from "@/hooks/WorkspaceProvider";
 import { formatBRL, formatInt } from "@/lib/commercial";
 import {
@@ -32,8 +33,8 @@ export default function IuliCadastros() {
   const products = snap<{ itens: Product[] }>(snaps, "products")?.itens ?? [];
   const charges = snap<Charges>(snaps, "charges:all");
 
-  const [situacao, setSituacao] = useState<string>("em_andamento");
-  const [search, setSearch] = useState("");
+  const [situacao, setSituacao] = usePersistentState<string>("cadastros:situacao", "em_andamento");
+  const [search, setSearch] = usePersistentState<string>("cadastros:busca", "");
 
   const d = useMemo(() => {
     const bySituacao = projects.reduce<Record<string, number>>((acc, p) => ({ ...acc, [p.situacao]: (acc[p.situacao] ?? 0) + 1 }), {});

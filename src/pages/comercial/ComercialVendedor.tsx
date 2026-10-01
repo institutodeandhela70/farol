@@ -6,6 +6,7 @@ import { useHubspotOwners, useHubspotPipelines } from "@/lib/hubspotMeta";
 import {
   addMonths,
   closingBySeller,
+  dayLabelLong,
   formatBRL,
   formatBRLShort,
   formatInt,
@@ -14,9 +15,12 @@ import {
   monthLabel,
   monthsBetween,
   NO_OWNER,
+  periodEndISO,
   periodLabel,
+  periodStartISO,
   sumBy,
   useClosing,
+  useClosingRange,
   useCommercialFilters,
   useGoals,
   useMeetingsByConductor,
@@ -45,11 +49,14 @@ export default function ComercialVendedor() {
   const owners = useHubspotOwners(workspace?.id);
   const { pipelineLabel, stageLabel } = useHubspotPipelines(workspace?.id);
   const { filters, setFilters } = useCommercialFilters();
-  const { from, to } = filters;
+  const { from, to, fromDay, toDay } = filters;
+  const dayMode = !!(fromDay && toDay);
+  const periodDescription = dayMode ? `${dayLabelLong(fromDay!)} a ${dayLabelLong(toDay!)}` : periodLabel(from, to);
   const chartFrom = addMonths(to, -5) < from ? addMonths(to, -5) : from;
 
   const pipelines = useSalesPipelines(workspace?.id);
   const closing = useClosing(workspace?.id, chartFrom, to, filters);
+  const periodClosing = useClosingRange(workspace?.id, periodStartISO(filters), periodEndISO(filters), filters);
   const conductor = useMeetingsByConductor(workspace?.id, filters);
   const scheduler = useMeetingsByScheduler(workspace?.id, filters, "created");
   const open = useOpenPipeline(workspace?.id, filters);
@@ -57,9 +64,8 @@ export default function ComercialVendedor() {
 
   // Sem vendedor escolhido: abre no que mais vendeu no período.
   const topSeller = useMemo(() => {
-    const inPeriod = (closing.data ?? []).filter((r) => r.month >= from && r.month <= to);
-    return closingBySeller(inPeriod).find((s) => s.owner_id !== NO_OWNER)?.owner_id ?? null;
-  }, [closing.data, from, to]);
+    return closingBySeller(periodClosing.data ?? []).find((s) => s.owner_id !== NO_OWNER)?.owner_id ?? null;
+  }, [periodClosing.data]);
   const seller = filters.owner ?? topSeller;
 
   const candidates = ownerOptions(owners, [
@@ -71,10 +77,10 @@ export default function ComercialVendedor() {
 
   const mine = useMemo(() => {
     const closingRows = (closing.data ?? []).filter((r) => r.owner_id === seller);
-    const inPeriod = closingRows.filter((r) => r.month >= from && r.month <= to);
-    const won = sumBy(inPeriod, (r) => r.won_count);
-    const lost = sumBy(inPeriod, (r) => r.lost_count);
-    const amount = sumBy(inPeriod, (r) => r.won_amount);
+    const periodRows = (periodClosing.data ?? []).filter((r) => r.owner_id === seller);
+    const won = sumBy(periodRows, (r) => r.won_count);
+    const lost = sumBy(periodRows, (r) => r.lost_count);
+    const amount = sumBy(periodRows, (r) => r.won_amount);
     const conducted = (conductor.data ?? []).find((r) => r.owner_id === seller);
     const scheduled = (scheduler.data ?? []).find((r) => r.scheduler_owner_id === seller);
     const openRows = (open.data ?? []).filter((r) => r.owner_id === seller);
@@ -103,19 +109,19 @@ export default function ComercialVendedor() {
         inPeriod: m >= from && m <= to,
       })),
     };
-  }, [seller, closing.data, conductor.data, scheduler.data, open.data, goals.data, from, to, pipelineLabel, stageLabel]);
+  }, [seller, closing.data, periodClosing.data, conductor.data, scheduler.data, open.data, goals.data, from, to, pipelineLabel, stageLabel]);
 
-  const loading = closing.isLoading || conductor.isLoading;
+  const loading = closing.isLoading || periodClosing.isLoading || conductor.isLoading;
   const g = mine.goal;
 
   return (
     <CommercialShell
       title={seller ? ownerDisplay(owners, seller) : "Ficha do Vendedor"}
-      description={`${periodLabel(from, to)} · ficha individual para 1:1`}
+      description={`${periodDescription} · ficha individual para 1:1`}
       filters={
         <FilterBar>
           <OwnerSelect value={seller} owners={candidates} onChange={(v) => setFilters({ owner: v })} allowAll={false} placeholder="Escolha um vendedor" />
-          <PeriodSelect from={from} to={to} onChange={(f, t) => setFilters({ from: f, to: t })} />
+          <PeriodSelect from={from} to={to} fromDay={fromDay} toDay={toDay} onChange={(patch) => setFilters(patch)} allowDayPicker />
           <PipelineSelect pipelines={pipelines.data ?? []} selected={filters.pipelines} onChange={(v) => setFilters({ pipelines: v })} />
           <AttributionToggle value={filters.attribution} onChange={(v) => setFilters({ attribution: v })} />
         </FilterBar>

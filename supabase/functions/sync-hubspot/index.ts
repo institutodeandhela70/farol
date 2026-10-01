@@ -251,16 +251,19 @@ interface HubspotItem {
   updatedAt?: string;
 }
 
-// Vínculo reunião↔contato é uma associação, não uma propriedade — a HubSpot
-// não devolve isso no batch/read normal, precisa de uma chamada à parte.
-async function fetchMeetingContactAssociations(
+// Vínculo reunião↔contato e negócio↔contato são associações, não propriedades —
+// a HubSpot não devolve isso no batch/read normal, precisa de uma chamada à parte.
+type AssociationType = "meetings" | "deals";
+
+async function fetchContactAssociations(
+  fromType: AssociationType,
   ids: string[],
   headers: Record<string, string>,
 ): Promise<Record<string, string[]>> {
   const map: Record<string, string[]> = {};
   if (ids.length === 0) return map;
 
-  const res = await hubspotFetch("https://api.hubapi.com/crm/v4/associations/meetings/contacts/batch/read", {
+  const res = await hubspotFetch(`https://api.hubapi.com/crm/v4/associations/${fromType}/contacts/batch/read`, {
     method: "POST",
     headers,
     body: JSON.stringify({ inputs: ids.map((id) => ({ id })) }),
@@ -279,13 +282,13 @@ function toRows(
   type: ObjectType,
   workspaceId: string,
   items: HubspotItem[],
-  contactIdsByMeeting: Record<string, string[]> = {},
+  contactIdsByItem: Record<string, string[]> = {},
 ) {
   return items.map((item) => ({
     workspace_id: workspaceId,
     hubspot_id: item.id,
     ...promotedColumns(type, item.properties ?? {}),
-    ...(type === "meetings" ? { contact_ids: contactIdsByMeeting[item.id] ?? [] } : {}),
+    ...(type === "meetings" || type === "deals" ? { contact_ids: contactIdsByItem[item.id] ?? [] } : {}),
     created_at_hubspot: item.createdAt || null,
     updated_at_hubspot: item.updatedAt || null,
     raw_properties: item.properties ?? {},
@@ -481,12 +484,14 @@ Deno.serve(async (req) => {
             const batchBody = await batchRes.json();
             const results: HubspotItem[] = batchBody.results ?? [];
 
-            const contactIdsByMeeting =
-              type === "meetings" ? await fetchMeetingContactAssociations(ids, headers) : {};
+            const contactIdsByItem =
+              type === "meetings" || type === "deals"
+                ? await fetchContactAssociations(type, ids, headers)
+                : {};
 
             const { error: upsertError } = await admin
               .from(TABLE_BY_TYPE[type])
-              .upsert(toRows(type, integration.workspace_id, results, contactIdsByMeeting), {
+              .upsert(toRows(type, integration.workspace_id, results, contactIdsByItem), {
                 onConflict: "workspace_id,hubspot_id",
               });
             if (upsertError) {
@@ -555,9 +560,10 @@ Deno.serve(async (req) => {
           const page = await res.json();
           const results: HubspotItem[] = page.results ?? [];
           if (results.length > 0) {
-            const contactIdsByMeeting =
-              type === "meetings"
-                ? await fetchMeetingContactAssociations(
+            const contactIdsByItem =
+              type === "meetings" || type === "deals"
+                ? await fetchContactAssociations(
+                    type,
                     results.map((r) => r.id),
                     headers,
                   )
@@ -565,7 +571,7 @@ Deno.serve(async (req) => {
 
             const { error: upsertError } = await admin
               .from(TABLE_BY_TYPE[type])
-              .upsert(toRows(type, integration.workspace_id, results, contactIdsByMeeting), {
+              .upsert(toRows(type, integration.workspace_id, results, contactIdsByItem), {
                 onConflict: "workspace_id,hubspot_id",
               });
             if (upsertError) {

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
+import { usePersistentSearchParams } from "@/lib/iuliPersist";
 
 // Filtros do Dashboard Financeiro IULI — ficam na URL, então um link abre
 // exatamente a mesma visão. Datas no formato YYYY-MM-DD; "hoje" no fuso de SP.
@@ -109,7 +109,7 @@ export interface IuliFilters {
 }
 
 export function useIuliFilters(defaultCompany: string = "todas") {
-  const [params, setParams] = useSearchParams();
+  const [params, setParams] = usePersistentSearchParams();
 
   const filters = useMemo<IuliFilters>(() => {
     const preset = (params.get("p") as PeriodPreset) || "mes";
@@ -148,7 +148,7 @@ export function useIuliFilters(defaultCompany: string = "todas") {
       if (v === null || v === "" || (Array.isArray(v) && !v.length)) next.delete(k);
       else next.set(k, Array.isArray(v) ? v.join(",") : v);
     }
-    setParams(next, { replace: true });
+    setParams(next);
   };
 
   return { filters, set };

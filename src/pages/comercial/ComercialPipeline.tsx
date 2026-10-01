@@ -6,15 +6,20 @@ import { useHubspotOwners, useHubspotPipelines } from "@/lib/hubspotMeta";
 import {
   addMonths,
   currentYM,
+  dayEndISO,
+  dayStartISO,
   formatBRL,
   formatBRLShort,
   formatInt,
   formatPct,
+  monthEndISO,
   monthLabel,
+  monthStartISO,
   monthsBetween,
   NO_OWNER,
   sumBy,
   useCommercialFilters,
+  useCustomers,
   useOpenPipeline,
   useSalesPipelines,
   type OpenPipelineRow,
@@ -24,12 +29,14 @@ import {
 import {
   AttributionToggle,
   CommercialShell,
+  CustomerTable,
   EmptyState,
   FilterBar,
   KpiCard,
   LoadingBlock,
   OwnerSelect,
   Panel,
+  PeriodSelect,
   PipelineSelect,
   ProgressBar,
 } from "@/components/commercial/CommercialUI";
@@ -64,8 +71,14 @@ export default function ComercialPipeline() {
   const owners = useHubspotOwners(workspace?.id);
   const { pipelines: pipelineMeta, pipelineLabel } = useHubspotPipelines(workspace?.id);
   const { filters, setFilters } = useCommercialFilters();
+  const { from, to, fromDay, toDay } = filters;
+  const dayMode = !!(fromDay && toDay);
+  const customerStartISO = dayMode ? dayStartISO(fromDay!) : monthStartISO(from);
+  const customerEndISO = dayMode ? dayEndISO(toDay!) : monthEndISO(to);
   const sales = useSalesPipelines(workspace?.id);
   const open = useOpenPipeline(workspace?.id, filters);
+  const customers = useCustomers(workspace?.id, customerStartISO, customerEndISO, filters);
+  const customerRows = (customers.data ?? []).filter((r) => !filters.owner || r.owner_id === filters.owner);
   const nowYM = currentYM();
 
   const rows = useMemo(() => (open.data ?? []).filter((r) => !filters.owner || r.owner_id === filters.owner), [open.data, filters.owner]);
@@ -126,6 +139,7 @@ export default function ComercialPipeline() {
           <OwnerSelect value={filters.owner} owners={ownerOptions(owners, (open.data ?? []).map((r) => r.owner_id))} onChange={(v) => setFilters({ owner: v })} />
           <PipelineSelect pipelines={sales.data ?? []} selected={filters.pipelines} onChange={(v) => setFilters({ pipelines: v })} />
           <AttributionToggle value={filters.attribution} onChange={(v) => setFilters({ attribution: v })} />
+          <PeriodSelect from={from} to={to} fromDay={fromDay} toDay={toDay} onChange={(patch) => setFilters(patch)} allowDayPicker />
         </FilterBar>
       }
     >
@@ -223,6 +237,18 @@ export default function ComercialPipeline() {
         <AggTable info={SOURCES.openTable(filters.attribution)} title="Por pipeline" firstCol="Pipeline" rows={byPipeline} loading={open.isLoading} />
         <AggTable info={SOURCES.openTable(filters.attribution)} title="Por vendedor" firstCol="Vendedor" rows={bySeller} loading={open.isLoading} warnKey={NO_OWNER} />
       </div>
+
+      <Panel
+        title="Visão por cliente"
+        info={SOURCES.openTable(filters.attribution)}
+        action={
+          <span className="text-sm text-muted-foreground">
+            Negócios ganhos no período do filtro "Período" acima · não conta o pipeline em aberto
+          </span>
+        }
+      >
+        <CustomerTable rows={customerRows} loading={customers.isLoading} ownerName={(id) => ownerDisplay(owners, id)} />
+      </Panel>
     </CommercialShell>
   );
 }

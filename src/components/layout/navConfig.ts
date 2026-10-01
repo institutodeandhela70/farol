@@ -11,6 +11,8 @@ import {
   FileText,
   FolderKanban,
   HandCoins,
+  Package,
+  Tags,
   Repeat,
   ShoppingCart,
   Wallet,
@@ -50,6 +52,19 @@ export const topLevelLinks: NavLink[] = [
 ];
 
 export const navGroups: NavGroup[] = [
+  {
+    id: "resultado",
+    label: "Resultado",
+    icon: BarChart3,
+    children: [
+      { id: "resultado/visao-geral", label: "Visão Geral", icon: LayoutDashboard },
+      { id: "resultado/vendas", label: "Vendas", icon: ShoppingCart },
+      { id: "resultado/receita", label: "Receita", icon: TrendingUp },
+      { id: "resultado/caixa", label: "Caixa", icon: HandCoins },
+      { id: "resultado/produtos", label: "Produtos", icon: Package },
+      { id: "resultado/categorias", label: "Categorias IULI", icon: Tags },
+    ],
+  },
   {
     id: "comercial",
     label: "Comercial",

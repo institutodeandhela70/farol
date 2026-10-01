@@ -7,16 +7,21 @@ import { useHubspotOwners } from "@/lib/hubspotMeta";
 import { cn } from "@/lib/utils";
 import {
   addMonths,
+  dayLabelLong,
   formatBRL,
   formatBRLShort,
   formatInt,
   formatPct,
+  monthEndISO,
   monthLabel,
   monthsBetween,
+  monthStartISO,
   NO_OWNER,
+  periodEndISO,
   periodLabel,
+  periodStartISO,
   sumBy,
-  useClosing,
+  useClosingRange,
   useCommercialFilters,
   useSalesPipelines,
   ownerDisplay,
@@ -41,6 +46,9 @@ export default function ComercialFechamento() {
   const navigate = useNavigate();
   const location = useLocation();
   const { filters, setFilters } = useCommercialFilters();
+  const { fromDay, toDay } = filters;
+  const dayMode = !!(fromDay && toDay);
+  const periodDescription = dayMode ? `${dayLabelLong(fromDay!)} a ${dayLabelLong(toDay!)}` : periodLabel(filters.from, filters.to);
   const [metric, setMetric] = useState<Metric>("amount");
 
   // Um mês só não dá mapa de calor — mostra os 6 meses até ele.
@@ -49,7 +57,11 @@ export default function ComercialFechamento() {
   const months = monthsBetween(from, to);
 
   const pipelines = useSalesPipelines(workspace?.id);
-  const closing = useClosing(workspace?.id, from, to, filters);
+  // Usa o recorte exato (dia ou mês) pra puxar só os negócios do período escolhido;
+  // o agrupamento em colunas continua por mês (o dado bruto já vem com o mês do fechamento).
+  const closingStartISO = dayMode ? periodStartISO(filters) : monthStartISO(from);
+  const closingEndISO = dayMode ? periodEndISO(filters) : monthEndISO(to);
+  const closing = useClosingRange(workspace?.id, closingStartISO, closingEndISO, filters);
 
   const heatRows = useMemo(() => {
     const map = new Map<string, number[]>();
@@ -91,10 +103,10 @@ export default function ComercialFechamento() {
   return (
     <CommercialShell
       title="Fechamento Mensal"
-      description={`${periodLabel(from, to)} · negócios fechados pela data de fechamento`}
+      description={`${periodDescription} · negócios fechados pela data de fechamento`}
       filters={
         <FilterBar>
-          <PeriodSelect from={filters.from} to={filters.to} onChange={(f, t) => setFilters({ from: f, to: t })} />
+          <PeriodSelect from={filters.from} to={filters.to} fromDay={fromDay} toDay={toDay} onChange={(patch) => setFilters(patch)} allowDayPicker />
           <PipelineSelect pipelines={pipelines.data ?? []} selected={filters.pipelines} onChange={(v) => setFilters({ pipelines: v })} />
           <AttributionToggle value={filters.attribution} onChange={(v) => setFilters({ attribution: v })} />
         </FilterBar>

@@ -36,6 +36,12 @@ import HubspotContacts from "@/pages/HubspotContacts";
 import HubspotDeals from "@/pages/HubspotDeals";
 import HubspotMeetings from "@/pages/HubspotMeetings";
 import IntegrationLogs from "@/pages/IntegrationLogs";
+import ResultadoVisaoGeral from "@/pages/resultado/ResultadoVisaoGeral";
+import ResultadoVendas from "@/pages/resultado/ResultadoVendas";
+import ResultadoReceita from "@/pages/resultado/ResultadoReceita";
+import ResultadoCaixa from "@/pages/resultado/ResultadoCaixa";
+import ResultadoProdutos from "@/pages/resultado/ResultadoProdutos";
+import ResultadoCategorias from "@/pages/resultado/ResultadoCategorias";
 import ComercialVisaoGeral from "@/pages/comercial/ComercialVisaoGeral";
 import ComercialAgenda from "@/pages/comercial/ComercialAgenda";
 import ComercialPipeline from "@/pages/comercial/ComercialPipeline";
@@ -65,6 +71,12 @@ const customPages: Record<string, ComponentType> = {
   "dashboards/hubspot-contatos": HubspotContacts,
   "dashboards/hubspot-negocios": HubspotDeals,
   "dashboards/hubspot-agendas": HubspotMeetings,
+  "resultado/visao-geral": ResultadoVisaoGeral,
+  "resultado/vendas": ResultadoVendas,
+  "resultado/receita": ResultadoReceita,
+  "resultado/caixa": ResultadoCaixa,
+  "resultado/produtos": ResultadoProdutos,
+  "resultado/categorias": ResultadoCategorias,
   "comercial/visao-geral": ComercialVisaoGeral,
   "comercial/agenda": ComercialAgenda,
   "comercial/pipeline": ComercialPipeline,
@@ -110,6 +122,7 @@ function App() {
                     <Route index element={<Navigate to="/dashboard" replace />} />
                     <Route path="financeiro/receitas/:importId" element={<ReceitasEnriquecimento />} />
                     <Route path="eventos/:eventId" element={<EventoDetalhe />} />
+                    <Route path="resultado" element={<Navigate to="/resultado/visao-geral" replace />} />
                     <Route path="comercial" element={<Navigate to="/comercial/visao-geral" replace />} />
                     <Route path="iuli" element={<Navigate to="/iuli/visao-geral" replace />} />
                     {allRoutes.map((route) => {

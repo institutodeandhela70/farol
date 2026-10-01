@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { usePersistentSearchParams } from "@/lib/iuliPersist";
 import { supabase } from "@/lib/supabase";
 import { addMonths, currentYM } from "@/lib/commercial";
 
@@ -56,14 +56,14 @@ export function useIuliCompanies(workspaceId: string | undefined) {
  * link abre na empresa certa). Sem seleção, a primeira conectada.
  */
 export function useIuliSelectedCompany(workspaceId: string | undefined) {
-  const [params, setParams] = useSearchParams();
+  const [params, setParams] = usePersistentSearchParams();
   const companies = useIuliCompanies(workspaceId);
   const wanted = params.get("empresa");
   const selected = companies.data?.find((c) => c.id === wanted) ?? companies.data?.[0] ?? null;
   const select = (id: string) => {
     const next = new URLSearchParams(params);
     next.set("empresa", id);
-    setParams(next, { replace: true });
+    setParams(next);
   };
   return { companies: companies.data ?? [], isLoading: companies.isLoading, selected, select };
 }

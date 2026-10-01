@@ -22,13 +22,17 @@ import {
 // camadas pelo que muda de verdade:
 //
 //   a cada hora  *:recent            janela de 90 dias (venda nova, status recente, baixa recente)
-//   a cada 6h    invoices:undated    as 100 negadas mais recentes (a IULI não grava data nelas)
+//                transactions:recent categoria (list_transactions) dos lançamentos pagos/vencendo em volta de hoje
+//                categories:full     plano de contas (list_categories), 1x por dia
+//   1x por dia   transactions:open / :classify  em aberto fora da janela; "a classificar" (podem ser recategorizados)
+//   1x por mês   transactions:backfill  histórico da categoria, do mês atual para trás até TX_FLOOR
+//   a cada 6h    invoices:undated   as 100 negadas mais recentes (a IULI não grava data nelas)
 //                subscriptions:full  todas as assinaturas (são poucas)
 //                conciliation:recent log de conciliação da IULI → títulos que receberam baixa
 //   1x por dia   receivables:pending todos os títulos sem baixa, de qualquer data
 //                sales:12m           vendas dos últimos 12 meses (reembolso, chargeback)
 //                invoices:6m         notas dos últimos 6 meses (cancelamentos)
-//                conferência         base local × totais oficiais da IULI (iuli_consistency)
+//   a cada 2h    conferência         base local × totais oficiais da IULI (iuli_consistency)
 //   1x por mês   *:full              releitura completa (rede de segurança)
 //   sob demanda  repair:*            releitura de uma data/mês: título que saiu da lista
 //                                    "sem baixa", mês que não bateu na conferência, etc.
@@ -58,7 +62,8 @@ const DAY = 24 * HOUR;
 const PAGE = 100;
 const INVOICES_START = "2020-01-01";
 const FULL_TASKS = ["sales:full", "receivables:full", "invoices:full"];
-const CONSISTENCY_EVERY = DAY;
+// A cada 2h: é só SQL (não chama a IULI) e evita aviso de divergência velho na tela depois que os reparos já corrigiram.
+const CONSISTENCY_EVERY = 2 * HOUR;
 const MAX_NEW_REPAIRS = 8;
 
 // deno-lint-ignore no-explicit-any
@@ -66,7 +71,7 @@ type Row = Record<string, any>;
 type Cursor = Record<string, unknown>;
 // deno-lint-ignore no-explicit-any
 type Admin = any;
-type Table = "iuli_sales" | "iuli_receivables" | "iuli_invoices" | "iuli_subscriptions";
+type Table = "iuli_sales" | "iuli_receivables" | "iuli_invoices" | "iuli_subscriptions" | "iuli_categories";
 
 interface Ctx {
   call: IuliCaller;
@@ -74,10 +79,14 @@ interface Ctx {
   integrationId: string;
   workspaceId: string;
   today: string;
+  // chave do HMAC do documento (IULI_DOC_HASH_KEY); sem ela o doc_hash não é preenchido
+  docKey: CryptoKey | null;
 }
 
 interface StepResult {
   rows: Row[];
+  // lançamentos (list_transactions): só preenchem a categoria em títulos que já existem
+  txRows?: Row[];
   table?: Table;
   next: Cursor | null;
   total?: number | null;
@@ -159,8 +168,46 @@ const receivableRow = (i: Row) => ({
   tem_boleto: !!i.tem_boleto,
   tem_comprovante: !!i.tem_comprovante,
   tem_nf: !!i.tem_nf,
+  // só em trânsito: vira doc_hash antes de gravar (o documento em claro não é guardado)
+  _documento: i.documento ?? null,
   removed_at: null,
 });
+
+const categoryRow = (i: Row) => ({
+  iuli_id: i.id,
+  nome: i.nome ?? "",
+  nivel: num(i.nivel),
+  pai_id: num(i.categoria_pai_id),
+  tipo: num(i.type),
+  dre_category_id: num(i.dre_category_id),
+  categoria_dre: i.categoria_dre ?? null,
+  codigo_contabil: i.codigo_contabil ?? null,
+  removed_at: null,
+});
+
+const txRow = (i: Row) => ({
+  iuli_id: i.id,
+  categoria_id: num(i.categoria_id),
+  categoria: i.categoria ?? null,
+  venda_id: num(i.venda_id),
+  contraparte: i.contraparte ?? null,
+  conta_id: num(i.conta_id),
+  conciliado: i.conciliado == null ? null : !!i.conciliado,
+});
+
+/** HMAC-SHA256 (hex) só dos dígitos do CPF/CNPJ; null se não houver documento ou chave. */
+async function docHash(key: CryptoKey | null, documento: unknown): Promise<string | null> {
+  const digits = String(documento ?? "").replace(/\D/g, "");
+  if (!key || !digits) return null;
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(digits));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function importDocKey(): Promise<CryptoKey | null> {
+  const secret = Deno.env.get("IULI_DOC_HASH_KEY");
+  if (!secret) return null;
+  return await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+}
 
 const invoiceRow = (i: Row) => ({
   iuli_id: i.id,
@@ -207,6 +254,61 @@ function offsetStep(tool: string, table: Table, map: (i: Row) => Row, extraArgs:
     const next = page?.ha_mais && items.length ? { ...cursor, offset: offset + items.length } : null;
     return { rows: items.map(map), table, next, total: page?.total_encontrado ?? null };
   };
+}
+
+/**
+ * Lançamentos de receita (list_transactions) — categoria de cada título.
+ *
+ * O cursor carrega uma lista de "passadas" (campo de data + intervalo + filtros)
+ * e anda página a página por elas. A carga histórica vai do mês atual para trás
+ * (o mês corrente fica pronto primeiro) e, por mês, lê o que foi PAGO nele e o
+ * que VENCE nele — assim Receita (data de pagamento) e Caixa (vencimento)
+ * ficam completos, mesmo antes do histórico inteiro chegar.
+ */
+interface TxPass {
+  date_field?: "due_date" | "payment_date";
+  payed?: boolean;
+  start?: string;
+  end?: string;
+  classify?: boolean; // só "sem categoria" / "a classificar"
+}
+
+const TX_FLOOR = "2025-01"; // histórico mais antigo da carga inicial; o resto é sob demanda
+
+function txBackfillPasses(today: string, floor = TX_FLOOR): TxPass[] {
+  const passes: TxPass[] = [];
+  let ym = today.slice(0, 7);
+  for (let guard = 0; guard < 120; guard++) {
+    const { from, to } = monthBounds(ym);
+    passes.push({ date_field: "payment_date", payed: true, start: from, end: to });
+    passes.push({ date_field: "due_date", start: from, end: to });
+    if (ym <= floor) break;
+    const [y, m] = ym.split("-").map(Number);
+    ym = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+  }
+  return passes;
+}
+
+async function txStep(ctx: Ctx, cursor: Cursor): Promise<StepResult> {
+  const passes = (cursor.passes ?? []) as TxPass[];
+  const i = Number(cursor.i ?? 0);
+  const offset = Number(cursor.offset ?? 0);
+  const pass = passes[i];
+  if (!pass) return { rows: [], next: null };
+
+  const args: Record<string, unknown> = { type: "receita", limit: PAGE, offset };
+  if (pass.date_field) args.date_field = pass.date_field;
+  if (pass.start) args.start_date = pass.start;
+  if (pass.end) args.end_date = pass.end;
+  if (pass.payed !== undefined) args.payed = pass.payed;
+  if (pass.classify) args.categoria_a_classificar = true;
+
+  const page = await ctx.call("list_transactions", args);
+  const items: Row[] = page?.itens ?? [];
+  let next: Cursor | null = null;
+  if (page?.ha_mais && items.length) next = { ...cursor, i, offset: offset + items.length };
+  else if (i + 1 < passes.length) next = { ...cursor, i: i + 1, offset: 0 };
+  return { rows: [], txRows: items.map(txRow), next, total: page?.total_encontrado ?? null };
 }
 
 /**
@@ -465,7 +567,60 @@ const TASKS: TaskDef[] = [
       return { rows: (page?.itens ?? []).map(invoiceRow), table: "iuli_invoices", next: null };
     },
   },
+  {
+    // Plano de contas (categorias e grupo DRE) — poucas centenas, uma página.
+    task: "categories:full",
+    tool: "list_categories",
+    every: DAY,
+    tier: 0,
+    init: () => ({}),
+    step: async (ctx) => {
+      const page = await ctx.call("list_categories", { limit: 500 });
+      return { rows: (page?.itens ?? []).map(categoryRow), table: "iuli_categories", next: null };
+    },
+  },
+  {
+    // Categoria dos lançamentos recentes: pagos nos últimos 35 dias e com vencimento de -30 a +60.
+    task: "transactions:recent",
+    tool: "list_transactions",
+    every: HOUR,
+    tier: 0,
+    init: ({ today }) => ({
+      i: 0,
+      offset: 0,
+      passes: [
+        { date_field: "payment_date", payed: true, start: addDays(today, -35), end: today },
+        { date_field: "due_date", start: addDays(today, -30), end: addDays(today, 60) },
+      ] satisfies TxPass[],
+    }),
+    step: txStep,
+  },
   // --- 1x por dia ---
+  {
+    // Em aberto fora da janela recente (vencidos antigos e a vencer longe) — o Caixa precisa deles.
+    task: "transactions:open",
+    tool: "list_transactions",
+    every: DAY,
+    tier: 1,
+    init: ({ today }) => ({
+      i: 0,
+      offset: 0,
+      passes: [
+        { date_field: "due_date", payed: false, start: "2020-01-01", end: addDays(today, -31) },
+        { date_field: "due_date", start: addDays(today, 61), end: "2099-12-31" },
+      ] satisfies TxPass[],
+    }),
+    step: txStep,
+  },
+  {
+    // "RECEITA A CLASSIFICAR"/sem categoria: o financeiro corrige depois, então relê todo dia.
+    task: "transactions:classify",
+    tool: "list_transactions",
+    every: DAY,
+    tier: 1,
+    init: () => ({ i: 0, offset: 0, passes: [{ classify: true }] satisfies TxPass[] }),
+    step: txStep,
+  },
   {
     task: "receivables:pending",
     tool: "get_accounts_receivable",
@@ -496,6 +651,15 @@ const TASKS: TaskDef[] = [
     step: invoicesWindowStep,
   },
   // --- 1x por mês (a primeira passada é a carga inicial) ---
+  {
+    // Carga histórica da categoria: do mês atual para trás, até TX_FLOOR.
+    task: "transactions:backfill",
+    tool: "list_transactions",
+    every: 30 * DAY,
+    tier: 1,
+    init: ({ today }) => ({ i: 0, offset: 0, passes: txBackfillPasses(today) }),
+    step: txStep,
+  },
   {
     task: "sales:full",
     tool: "list_sales",
@@ -675,6 +839,7 @@ Deno.serve(async (req) => {
         integrationId: integration_id,
         workspaceId: integration.workspace_id,
         today: todaySP(),
+        docKey: await importDocKey(),
       };
 
       const loadState = async () => {
@@ -752,12 +917,27 @@ Deno.serve(async (req) => {
         try {
           const result = await task.step(ctx, s.cursor);
           const byId = new Map(result.rows.map((r) => [r.iuli_id, r]));
-          const rows = [...byId.values()].map((r) => ({
-            ...r,
-            integration_id,
-            workspace_id: integration.workspace_id,
-            synced_at: new Date().toISOString(),
-          }));
+          const rows = [];
+          for (const r of byId.values()) {
+            const { _documento, ...rest } = r;
+            // doc_hash só quando o título trouxe documento (não apaga o que já existe)
+            const hash = result.table === "iuli_receivables" ? await docHash(ctx.docKey, _documento) : null;
+            rows.push({
+              ...rest,
+              ...(hash ? { doc_hash: hash } : {}),
+              integration_id,
+              workspace_id: integration.workspace_id,
+              synced_at: new Date().toISOString(),
+            });
+          }
+          if (result.txRows?.length) {
+            const { data: matched, error } = await admin.rpc("iuli_apply_transactions", { p_integration_id: integration_id, p_rows: result.txRows });
+            if (error) throw new Error(`aplicar lançamentos: ${error.message}`);
+            // os que não casaram ainda não estão em iuli_receivables — a releitura de títulos os traz
+            const missing = result.txRows.length - Number(matched ?? 0);
+            if (missing > 0) result.warning = `${missing} lançamento(s) sem título correspondente ainda`;
+            sum.rows += Number(matched ?? 0);
+          }
           if (rows.length && result.table) {
             const { error } = await admin.from(result.table).upsert(rows, { onConflict: "integration_id,iuli_id" });
             if (error) throw new Error(`gravar ${result.table}: ${error.message}`);

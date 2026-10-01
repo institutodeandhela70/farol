@@ -6,6 +6,7 @@ import { useHubspotOwners } from "@/lib/hubspotMeta";
 import { cn } from "@/lib/utils";
 import {
   addMonths,
+  dayLabelLong,
   formatInt,
   formatPct,
   goalsByOwner,
@@ -52,7 +53,9 @@ export default function ComercialAgenda() {
   const { workspace } = useWorkspace();
   const owners = useHubspotOwners(workspace?.id);
   const { filters, setFilters } = useCommercialFilters();
-  const { from, to, owner } = filters;
+  const { from, to, fromDay, toDay, owner } = filters;
+  const dayMode = !!(fromDay && toDay);
+  const periodDescription = dayMode ? `${dayLabelLong(fromDay!)} a ${dayLabelLong(toDay!)}` : periodLabel(from, to);
   const [tab, setTab] = useState<Tab>("sdr");
   const [basis, setBasis] = useState<DateBasis>("created");
 
@@ -111,10 +114,10 @@ export default function ComercialAgenda() {
   return (
     <CommercialShell
       title="Agenda & Produtividade"
-      description={`${periodLabel(from, to)} · quem agendou (SDR) e quem conduziu (Closer)`}
+      description={`${periodDescription} · quem agendou (SDR) e quem conduziu (Closer)`}
       filters={
         <FilterBar>
-          <PeriodSelect from={from} to={to} onChange={(f, t) => setFilters({ from: f, to: t })} />
+          <PeriodSelect from={from} to={to} fromDay={fromDay} toDay={toDay} onChange={(patch) => setFilters(patch)} allowDayPicker />
           <OwnerSelect
             value={owner}
             owners={ownerOptions(owners, [

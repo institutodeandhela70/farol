@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, ChevronDown, Info } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, ChevronDown, Info, Search } from "lucide-react";
 import type { DataSource } from "@/lib/commercialSources";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,9 +16,15 @@ import {
 import {
   addMonths,
   currentYM,
+  daysInMonth,
+  dayLabelLong,
+  formatBRLShort,
+  formatInt,
   formatPct,
   monthLabel,
+  ymOf,
   type CommercialFilters,
+  type CustomerRow,
   type SalesPipeline,
 } from "@/lib/commercial";
 
@@ -122,30 +128,113 @@ function periodOptions(): { presets: PeriodOption[]; months: PeriodOption[] } {
   return { presets, months };
 }
 
-export function PeriodSelect({ from, to, onChange }: { from: string; to: string; onChange: (from: string, to: string) => void }) {
+export interface PeriodPatch {
+  from: string;
+  to: string;
+  fromDay: string | null;
+  toDay: string | null;
+}
+
+export function PeriodSelect({
+  from,
+  to,
+  fromDay,
+  toDay,
+  onChange,
+  allowDayPicker = false,
+}: {
+  from: string;
+  to: string;
+  fromDay?: string | null;
+  toDay?: string | null;
+  onChange: (patch: PeriodPatch) => void;
+  /** Mostra o seletor "Período personalizado (por dia)". Só ligue em telas cujos dados já
+   * respeitam fromDay/toDay — hoje só a Visão Geral. Nas demais o filtro viraria alcance de
+   * mês mesmo que o usuário escolha dias, dando números errados. */
+  allowDayPicker?: boolean;
+}) {
   const { presets, months } = periodOptions();
+  const dayMode = !!(fromDay && toDay);
   const value = `${from}|${to}`;
-  const current = [...presets, ...months].find((o) => o.value === value);
-  const label = current?.label ?? (from === to ? monthLabel(from, true) : `${monthLabel(from)} a ${monthLabel(to)}`);
+  const current = !dayMode ? [...presets, ...months].find((o) => o.value === value) : undefined;
+  const label = dayMode
+    ? `${dayLabelLong(fromDay!)} a ${dayLabelLong(toDay!)}`
+    : (current?.label ?? (from === to ? monthLabel(from, true) : `${monthLabel(from)} a ${monthLabel(to)}`));
+
+  const [open, setOpen] = useState(false);
+  const [draftFrom, setDraftFrom] = useState(fromDay ?? `${from}-01`);
+  const [draftTo, setDraftTo] = useState(toDay ?? `${to}-${String(daysInMonth(to)).padStart(2, "0")}`);
+
+  const selectPreset = (f: string, t: string) => onChange({ from: f, to: t, fromDay: null, toDay: null });
+
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) {
+          setDraftFrom(fromDay ?? `${from}-01`);
+          setDraftTo(toDay ?? `${to}-${String(daysInMonth(to)).padStart(2, "0")}`);
+        }
+      }}
+    >
       <DropdownMenuTrigger className={triggerClass} aria-label="Período">
         {label}
         <ChevronDown className="size-4 text-muted-foreground" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
+      <DropdownMenuContent align="start" className="max-h-96 overflow-y-auto">
         {presets.map((o) => (
-          <DropdownMenuItem key={o.label} onSelect={() => onChange(...(o.value.split("|") as [string, string]))}>
+          <DropdownMenuItem key={o.label} onSelect={() => selectPreset(...(o.value.split("|") as [string, string]))}>
             {o.label}
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Mês</DropdownMenuLabel>
         {months.map((o) => (
-          <DropdownMenuItem key={o.value} onSelect={() => onChange(...(o.value.split("|") as [string, string]))}>
+          <DropdownMenuItem key={o.value} onSelect={() => selectPreset(...(o.value.split("|") as [string, string]))}>
             {o.label}
           </DropdownMenuItem>
         ))}
+        {allowDayPicker && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Período personalizado (por dia){dayMode ? " · ativo" : ""}</DropdownMenuLabel>
+            <div className="flex flex-col gap-2 px-2 pb-2 pt-1">
+              <div className="flex items-center gap-2">
+                <label className="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
+                  De
+                  <input
+                    type="date"
+                    value={draftFrom}
+                    onChange={(e) => setDraftFrom(e.target.value)}
+                    className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                  />
+                </label>
+                <label className="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
+                  Até
+                  <input
+                    type="date"
+                    value={draftTo}
+                    onChange={(e) => setDraftTo(e.target.value)}
+                    className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                disabled={!draftFrom || !draftTo}
+                onClick={() => {
+                  const [f, t] = draftFrom <= draftTo ? [draftFrom, draftTo] : [draftTo, draftFrom];
+                  onChange({ from: ymOf(f), to: ymOf(t), fromDay: f, toDay: t });
+                  setOpen(false);
+                }}
+                className="h-9 rounded-md bg-primary text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                Aplicar
+              </button>
+            </div>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -518,5 +607,80 @@ export function BarList({
         </li>
       ))}
     </ul>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Visão por cliente — quanto cada cliente pagou e o que comprou, no período.
+// ---------------------------------------------------------------------------
+
+export function CustomerTable({ rows, loading, ownerName }: { rows: CustomerRow[]; loading: boolean; ownerName: (id: string) => string }) {
+  const [search, setSearch] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(
+      (r) => r.customer_name.toLowerCase().includes(q) || r.produto.toLowerCase().includes(q) || (r.customer_email ?? "").toLowerCase().includes(q),
+    );
+  }, [rows, search]);
+
+  const hasUnlinked = rows.some((r) => r.contact_id === "(sem contato)");
+
+  if (loading) return <LoadingBlock />;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar por cliente ou produto..."
+          className="h-9 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm"
+        />
+      </div>
+
+      {hasUnlinked && (
+        <p className="text-xs text-muted-foreground">
+          "Sem contato vinculado" = negócio sem um contato associado na HubSpot (ou que ainda não passou pelo vínculo).
+        </p>
+      )}
+
+      {filtered.length === 0 ? (
+        <EmptyState>Nenhum cliente encontrado.</EmptyState>
+      ) : (
+        <div className="-mx-4 max-h-96 overflow-y-auto overflow-x-auto md:mx-0">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead className="sticky top-0 bg-card text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <tr className="border-b border-border">
+                <th className="px-4 py-2 font-medium md:pl-0">Cliente</th>
+                <th className="px-3 py-2 font-medium">Produto</th>
+                <th className="px-3 py-2 font-medium">Vendedor</th>
+                <th className="px-3 py-2 text-right font-medium">Negócios</th>
+                <th className="px-4 py-2 text-right font-medium md:pr-0">Total pago</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r, i) => (
+                <tr key={`${r.contact_id}-${r.produto}-${r.owner_id}-${i}`} className="border-b border-border/60 last:border-0">
+                  <td className="px-4 py-2.5 md:pl-0">
+                    <div className="flex flex-col">
+                      <span className="font-medium">{r.customer_name}</span>
+                      {r.customer_email && <span className="text-xs text-muted-foreground">{r.customer_email}</span>}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5 text-muted-foreground">{r.produto}</td>
+                  <td className="px-3 py-2.5 text-muted-foreground">{ownerName(r.owner_id)}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{formatInt(r.deal_count)}</td>
+                  <td className="px-4 py-2.5 text-right font-semibold tabular-nums md:pr-0">{formatBRLShort(r.total_amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }

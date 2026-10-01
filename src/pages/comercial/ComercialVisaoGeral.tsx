@@ -5,34 +5,50 @@ import { SOURCES } from "@/lib/commercialSources";
 import { useWorkspace } from "@/hooks/WorkspaceProvider";
 import { useHubspotOwners } from "@/lib/hubspotMeta";
 import {
+  addDays,
   addMonths,
   closingBySeller,
+  dayEndISO,
+  dayLabel,
+  dayLabelLong,
+  dayStartISO,
+  daysBetween,
+  daysOfMonth,
   delta,
   formatBRL,
   formatBRLShort,
   formatInt,
   formatPct,
   goalsByOwner,
+  monthEndISO,
   monthLabel,
+  monthStartISO,
   monthsBetween,
   NO_OWNER,
+  periodEndISO,
   periodLabel,
+  periodStartISO,
   sumBy,
   useClosing,
+  useClosingRange,
   useCommercialFilters,
+  useCustomers,
+  useDailyClosing,
   useGoals,
   useMeetingsByConductor,
   useMeetingsByScheduler,
-  useMeetingsMonthly,
   useOpenPipeline,
   useSalesPipelines,
   ownerDisplay,
   ownerOptions,
+  ymOf,
+  type CommercialFilters,
 } from "@/lib/commercial";
 import {
   AttributionToggle,
   BarList,
   CommercialShell,
+  CustomerTable,
   EmptyState,
   FilterBar,
   KpiCard,
@@ -50,37 +66,57 @@ export default function ComercialVisaoGeral() {
   const location = useLocation();
   const owners = useHubspotOwners(workspace?.id);
   const { filters, setFilters } = useCommercialFilters();
-  const { from, to, owner } = filters;
+  const { from, to, fromDay, toDay, owner } = filters;
+  const dayMode = !!(fromDay && toDay);
 
   const periodMonths = monthsBetween(from, to);
   const prevFrom = addMonths(from, -periodMonths.length);
   const prevTo = addMonths(from, -1);
   const chartFrom = addMonths(to, -5) < prevFrom ? addMonths(to, -5) : prevFrom;
 
+  // Limites exatos do período atual/anterior — respeitam o recorte por dia quando ativo,
+  // senão caem no mês inteiro (mesmo comportamento de sempre).
+  const periodStart = periodStartISO(filters);
+  const periodEnd = periodEndISO(filters);
+  const prevFilters: CommercialFilters = dayMode
+    ? (() => {
+        const len = daysBetween(fromDay!, toDay!).length;
+        const prevToDay = addDays(fromDay!, -1);
+        const prevFromDay = addDays(prevToDay, -(len - 1));
+        return { ...filters, from: ymOf(prevFromDay), to: ymOf(prevToDay), fromDay: prevFromDay, toDay: prevToDay };
+      })()
+    : { ...filters, from: prevFrom, to: prevTo, fromDay: null, toDay: null };
+  const prevStart = periodStartISO(prevFilters);
+  const prevEnd = periodEndISO(prevFilters);
+
   const pipelines = useSalesPipelines(workspace?.id);
   const closing = useClosing(workspace?.id, chartFrom, to, filters);
-  const meetingsMonthly = useMeetingsMonthly(workspace?.id, chartFrom, to, filters.activityTypes);
+  const currentRange = useClosingRange(workspace?.id, periodStart, periodEnd, filters);
+  const prevRange = useClosingRange(workspace?.id, prevStart, prevEnd, filters);
   const conductor = useMeetingsByConductor(workspace?.id, filters);
+  const prevConductor = useMeetingsByConductor(workspace?.id, prevFilters);
   const scheduler = useMeetingsByScheduler(workspace?.id, filters, "created");
   const open = useOpenPipeline(workspace?.id, filters);
   const goals = useGoals(workspace?.id, from, to);
+  const dailyStartISO = dayMode ? dayStartISO(fromDay!) : monthStartISO(to);
+  const dailyEndISO = dayMode ? dayEndISO(toDay!) : monthEndISO(to);
+  const daily = useDailyClosing(workspace?.id, dailyStartISO, dailyEndISO, filters);
+  const customers = useCustomers(workspace?.id, periodStart, periodEnd, filters);
 
   const byOwner = <T extends { owner_id: string }>(rows: T[]) => (owner ? rows.filter((r) => r.owner_id === owner) : rows);
+  const customerRows = byOwner(customers.data ?? []);
 
   const data = useMemo(() => {
-    const closingRows = byOwner(closing.data ?? []);
-    const inPeriod = closingRows.filter((r) => r.month >= from && r.month <= to);
-    const inPrev = closingRows.filter((r) => r.month >= prevFrom && r.month <= prevTo);
-    const wonAmount = sumBy(inPeriod, (r) => r.won_amount);
-    const wonCount = sumBy(inPeriod, (r) => r.won_count);
-    const lostCount = sumBy(inPeriod, (r) => r.lost_count);
+    const currentRows = byOwner(currentRange.data ?? []);
+    const prevRows = byOwner(prevRange.data ?? []);
+    const wonAmount = sumBy(currentRows, (r) => r.won_amount);
+    const wonCount = sumBy(currentRows, (r) => r.won_count);
+    const lostCount = sumBy(currentRows, (r) => r.lost_count);
 
-    const meetingRows = meetingsMonthly.data ?? [];
     const conductorRows = byOwner(conductor.data ?? []);
-    const meetingsNow = owner
-      ? sumBy(conductorRows, (r) => r.total_count)
-      : sumBy(meetingRows.filter((r) => r.month >= from && r.month <= to), (r) => r.total_count);
-    const meetingsPrev = owner ? null : sumBy(meetingRows.filter((r) => r.month >= prevFrom && r.month <= prevTo), (r) => r.total_count);
+    const prevConductorRows = byOwner(prevConductor.data ?? []);
+    const meetingsNow = sumBy(conductorRows, (r) => r.total_count);
+    const meetingsPrev = sumBy(prevConductorRows, (r) => r.total_count);
     const past = sumBy(conductorRows, (r) => r.past_count);
     const unrecorded = sumBy(conductorRows, (r) => r.unrecorded_count);
     const upcoming = sumBy(conductorRows, (r) => r.upcoming_count);
@@ -91,6 +127,7 @@ export default function ComercialVisaoGeral() {
     const openCount = sumBy(openRows, (r) => r.open_count);
     const withoutAmount = sumBy(openRows, (r) => r.without_amount_count);
 
+    const closingRows = byOwner(closing.data ?? []);
     const chart = monthsBetween(addMonths(to, -5), to).map((m) => ({
       month: m,
       label: monthLabel(m),
@@ -98,19 +135,30 @@ export default function ComercialVisaoGeral() {
       inPeriod: m >= from && m <= to,
     }));
 
-    const sellers = closingBySeller(inPeriod);
+    const sellers = closingBySeller(currentRows);
     const noOwnerWon = sellers.find((s) => s.owner_id === NO_OWNER);
 
     return {
       wonAmount, wonCount, lostCount,
-      wonAmountPrev: sumBy(inPrev, (r) => r.won_amount),
-      wonCountPrev: sumBy(inPrev, (r) => r.won_count),
+      wonAmountPrev: sumBy(prevRows, (r) => r.won_amount),
+      wonCountPrev: sumBy(prevRows, (r) => r.won_count),
       meetingsNow, meetingsPrev, past, unrecorded, upcoming,
       openAmount, weighted, openCount, withoutAmount,
       chart, sellers, noOwnerWon,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [closing.data, meetingsMonthly.data, conductor.data, open.data, from, to, owner]);
+  }, [currentRange.data, prevRange.data, conductor.data, prevConductor.data, open.data, closing.data, from, to, owner]);
+
+  const dailyChart = useMemo(() => {
+    const rows = byOwner(daily.data ?? []);
+    const days = dayMode ? daysBetween(fromDay!, toDay!) : daysOfMonth(to);
+    return days.map((d) => ({
+      day: d,
+      label: dayLabel(d),
+      valor: sumBy(rows.filter((r) => r.day === d), (r) => r.won_amount),
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [daily.data, dayMode, fromDay, toDay, to, owner]);
 
   const goalMap = useMemo(() => goalsByOwner(goals.data ?? []), [goals.data]);
   const conductorByOwner = useMemo(() => new Map((conductor.data ?? []).map((r) => [r.owner_id, r])), [conductor.data]);
@@ -137,10 +185,12 @@ export default function ComercialVisaoGeral() {
   }, [goalMap, owner, owners, data.sellers, schedulerByOwner]);
 
   const ranking = data.sellers.filter((s) => s.owner_id !== NO_OWNER).slice(0, 10);
-  const loadingClosing = closing.isLoading;
+  const loadingPeriod = currentRange.isLoading;
+  const loadingChart = closing.isLoading;
   const unrecordedRatio = data.past ? data.unrecorded / data.past : null;
   const multiMonth = periodMonths.length > 1;
-  const prevLabel = multiMonth ? "vs período anterior" : `vs ${monthLabel(prevTo)}`;
+  const prevLabel = dayMode || multiMonth ? "vs período anterior" : `vs ${monthLabel(prevTo)}`;
+  const periodDescription = dayMode ? `${dayLabelLong(fromDay!)} a ${dayLabelLong(toDay!)}` : periodLabel(from, to);
 
   const sdrItems = (scheduler.data ?? [])
     .filter((r) => r.scheduler_user_id !== "(desconhecido)" && r.for_others_count > 0)
@@ -165,10 +215,10 @@ export default function ComercialVisaoGeral() {
   return (
     <CommercialShell
       title="Visão Geral"
-      description={`${periodLabel(from, to)} · ${filters.attribution === "closer" ? "venda atribuída ao closer" : "venda atribuída ao dono do negócio"}`}
+      description={`${periodDescription} · ${filters.attribution === "closer" ? "venda atribuída ao closer" : "venda atribuída ao dono do negócio"}`}
       filters={
         <FilterBar>
-          <PeriodSelect from={from} to={to} onChange={(f, t) => setFilters({ from: f, to: t })} />
+          <PeriodSelect from={from} to={to} fromDay={fromDay} toDay={toDay} onChange={(patch) => setFilters(patch)} allowDayPicker />
           <OwnerSelect value={owner} owners={ownerOptions(owners, data.sellers.map((s) => s.owner_id).concat((conductor.data ?? []).map((c) => c.owner_id)))} onChange={(v) => setFilters({ owner: v })} />
           <PipelineSelect pipelines={pipelines.data ?? []} selected={filters.pipelines} onChange={(v) => setFilters({ pipelines: v })} />
           <AttributionToggle value={filters.attribution} onChange={(v) => setFilters({ attribution: v })} />
@@ -176,22 +226,22 @@ export default function ComercialVisaoGeral() {
       }
     >
       <section aria-label="Indicadores" className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <KpiCard info={SOURCES.revenue(filters.attribution)} label="Receita fechada" value={formatBRLShort(data.wonAmount)} change={delta(data.wonAmount, data.wonAmountPrev)} sub={prevLabel} loading={loadingClosing} />
+        <KpiCard info={SOURCES.revenue(filters.attribution)} label="Receita fechada" value={formatBRLShort(data.wonAmount)} change={delta(data.wonAmount, data.wonAmountPrev)} sub={prevLabel} loading={loadingPeriod} />
         <KpiCard
           info={SOURCES.wonDeals(filters.attribution)}
           label="Negócios ganhos"
           value={formatInt(data.wonCount)}
           change={delta(data.wonCount, data.wonCountPrev)}
           sub={`${formatInt(data.lostCount)} perdidos · conv. ${formatPct(data.wonCount + data.lostCount ? data.wonCount / (data.wonCount + data.lostCount) : null)}`}
-          loading={loadingClosing}
+          loading={loadingPeriod}
         />
         <KpiCard
           info={SOURCES.meetings()}
           label="Reuniões"
           value={formatInt(data.meetingsNow)}
-          change={data.meetingsPrev === null ? undefined : delta(data.meetingsNow, data.meetingsPrev)}
+          change={delta(data.meetingsNow, data.meetingsPrev)}
           sub={`${formatInt(data.upcoming)} ainda por vir`}
-          loading={meetingsMonthly.isLoading || conductor.isLoading}
+          loading={conductor.isLoading || prevConductor.isLoading}
         />
         <KpiCard
           info={SOURCES.unrecorded()}
@@ -208,7 +258,7 @@ export default function ComercialVisaoGeral() {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Panel title="Fechamento mensal" info={SOURCES.closingChart(filters.attribution)} action={<span className="text-sm text-muted-foreground">Valor ganho · últimos 6 meses</span>} className="xl:col-span-2">
-          {loadingClosing ? (
+          {loadingChart ? (
             <LoadingBlock className="h-64" />
           ) : (
             <div className="h-64">
@@ -257,6 +307,45 @@ export default function ComercialVisaoGeral() {
         </Panel>
       </div>
 
+      <Panel
+        title="Fechamento diário"
+        info={SOURCES.closingChart(filters.attribution)}
+        action={
+          <span className="text-sm text-muted-foreground">
+            Valor ganho por dia · {dayMode ? `${dayLabelLong(fromDay!)} a ${dayLabelLong(toDay!)}` : monthLabel(to, true)}
+          </span>
+        }
+      >
+        {daily.isLoading ? (
+          <LoadingBlock className="h-56" />
+        ) : (
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={dailyChart} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} interval={2} />
+                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} width={64} tickFormatter={(v: number) => formatBRLShort(v).replace("R$ ", "")} />
+                <Tooltip
+                  formatter={(v: number) => [formatBRL(v), "Valor ganho"]}
+                  labelFormatter={(label: string) => `Dia ${label}`}
+                  cursor={{ fill: "hsl(var(--muted))" }}
+                  contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
+                />
+                <Bar dataKey="valor" radius={[4, 4, 0, 0]} maxBarSize={28} fill="hsl(var(--primary))" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </Panel>
+
+      <Panel
+        title="Visão por cliente"
+        info={SOURCES.closingChart(filters.attribution)}
+        action={<span className="text-sm text-muted-foreground">Quanto cada cliente pagou e o que comprou, no período</span>}
+      >
+        <CustomerTable rows={customerRows} loading={customers.isLoading} ownerName={(id) => ownerDisplay(owners, id)} />
+      </Panel>
+
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Panel title="Agenda · SDR → Closer" info={SOURCES.sdrCloser()} action={<Link to={{ pathname: "/comercial/agenda", search: location.search }} className="text-sm font-medium text-primary hover:underline">Ver agenda</Link>} className="xl:col-span-2">
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
@@ -294,7 +383,7 @@ export default function ComercialVisaoGeral() {
       </div>
 
       <Panel title="Ranking de vendedores" info={SOURCES.ranking(filters.attribution)}>
-        {loadingClosing ? (
+        {loadingPeriod ? (
           <LoadingBlock />
         ) : ranking.length === 0 ? (
           <EmptyState>Nenhum negócio fechado no período.</EmptyState>
