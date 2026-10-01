@@ -1,0 +1,186 @@
+import { createClient } from "npm:@supabase/supabase-js@2";
+import { logIntegrationCall } from "../_shared/integrationLog.ts";
+
+const ASAAS_BASE_URL: Record<string, string> = {
+  sandbox: "https://api-sandbox.asaas.com/v3",
+  production: "https://api.asaas.com/v3",
+};
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+  });
+}
+
+// Endpoints de listagem (paginados, resposta { data: [...], totalCount }) e
+// endpoints de objeto único (resposta direta), pra sondar o que tem dado de verdade.
+const LIST_ENDPOINTS = [
+  { key: "customers", path: "/customers?limit=1" },
+  { key: "payments", path: "/payments?limit=1" },
+  { key: "subscriptions", path: "/subscriptions?limit=1" },
+  { key: "installments", path: "/installments?limit=1" },
+  { key: "transfers", path: "/transfers?limit=1" },
+  { key: "anticipations", path: "/anticipations?limit=1" },
+  { key: "pixAddressKeys", path: "/pix/addressKeys" },
+];
+
+const OBJECT_ENDPOINTS = [{ key: "financeBalance", path: "/finance/balance" }];
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: CORS_HEADERS });
+  }
+
+  const startedAt = Date.now();
+  let workspaceId: string | null = null;
+  let integrationId: string | null = null;
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const admin = createClient(supabaseUrl, serviceRoleKey);
+
+  const log = (params: { status: "success" | "error"; statusCode: number; response?: unknown; errorMessage?: string }) =>
+    logIntegrationCall(admin, {
+      workspaceId,
+      integrationId,
+      provider: "asaas",
+      direction: "outbound",
+      eventType: "diagnose",
+      request: { integration_id: integrationId },
+      durationMs: Date.now() - startedAt,
+      ...params,
+    });
+
+  try {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      await log({ status: "error", statusCode: 401, errorMessage: "missing authorization" });
+      return json({ error: "missing authorization" }, 401);
+    }
+
+    const { integration_id } = await req.json();
+    if (!integration_id) {
+      await log({ status: "error", statusCode: 400, errorMessage: "integration_id required" });
+      return json({ error: "integration_id required" }, 400);
+    }
+    integrationId = integration_id;
+
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+
+    const { data: userData, error: userError } = await userClient.auth.getUser();
+    if (userError || !userData.user) {
+      await log({ status: "error", statusCode: 401, errorMessage: `invalid session: ${userError?.message ?? "sem usuário"}` });
+      return json({ error: "invalid session" }, 401);
+    }
+
+    const { data: integration, error: integrationError } = await admin
+      .from("integrations")
+      .select("id, workspace_id, config")
+      .eq("id", integration_id)
+      .single();
+    if (integrationError || !integration) {
+      await log({ status: "error", statusCode: 404, errorMessage: "integration not found" });
+      return json({ error: "integration not found" }, 404);
+    }
+    workspaceId = integration.workspace_id;
+
+    const { data: membership } = await admin
+      .from("workspace_members")
+      .select("id")
+      .eq("workspace_id", integration.workspace_id)
+      .eq("user_id", userData.user.id)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (!membership) {
+      await log({ status: "error", statusCode: 403, errorMessage: "forbidden: usuário não é membro ativo do workspace" });
+      return json({ error: "forbidden" }, 403);
+    }
+
+    const { data: secret, error: secretError } = await admin
+      .from("integration_secrets")
+      .select("api_key")
+      .eq("integration_id", integration_id)
+      .maybeSingle();
+    if (secretError || !secret) {
+      await log({ status: "error", statusCode: 400, errorMessage: "no api key saved" });
+      return json({ error: "no api key saved" }, 400);
+    }
+
+    const environment = integration.config?.environment === "production" ? "production" : "sandbox";
+    const baseUrl = ASAAS_BASE_URL[environment];
+    const headers = {
+      access_token: secret.api_key,
+      "User-Agent": "FarolID",
+      "Content-Type": "application/json",
+    };
+
+    const results: Record<string, unknown> = {};
+
+    await Promise.all(
+      LIST_ENDPOINTS.map(async ({ key, path }) => {
+        try {
+          const res = await fetch(`${baseUrl}${path}`, { headers });
+          if (!res.ok) {
+            results[key] = { ok: false, status: res.status, error: (await res.text()).slice(0, 300) };
+            return;
+          }
+          const body = await res.json();
+          results[key] = {
+            ok: true,
+            totalCount: body.totalCount ?? (Array.isArray(body.data) ? body.data.length : null),
+            sample: Array.isArray(body.data) ? body.data[0] ?? null : null,
+          };
+        } catch (err) {
+          results[key] = { ok: false, error: String(err) };
+        }
+      }),
+    );
+
+    await Promise.all(
+      OBJECT_ENDPOINTS.map(async ({ key, path }) => {
+        try {
+          const res = await fetch(`${baseUrl}${path}`, { headers });
+          if (!res.ok) {
+            results[key] = { ok: false, status: res.status, error: (await res.text()).slice(0, 300) };
+            return;
+          }
+          results[key] = { ok: true, data: await res.json() };
+        } catch (err) {
+          results[key] = { ok: false, error: String(err) };
+        }
+      }),
+    );
+
+    // Guarda uma versão enxuta (sem amostra completa dos registros) pra
+    // reaparecer ao reabrir a tela, sem precisar rodar de novo.
+    const slimResults: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(results)) {
+      const v = value as { ok: boolean; totalCount?: unknown; status?: number; error?: string };
+      slimResults[key] = { ok: v.ok, totalCount: v.totalCount ?? null, status: v.status, error: v.error };
+    }
+    await admin
+      .from("integrations")
+      .update({
+        config: {
+          ...integration.config,
+          last_diagnostics: slimResults,
+          last_diagnostics_at: new Date().toISOString(),
+        },
+      })
+      .eq("id", integration_id);
+
+    await log({ status: "success", statusCode: 200, response: slimResults });
+    return json({ environment, results });
+  } catch (err) {
+    await log({ status: "error", statusCode: 500, errorMessage: String(err) });
+    return json({ error: String(err) }, 500);
+  }
+});

@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "farol-id-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 8095
+    },
+    {
+      "name": "farol-id-claude",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--port", "8097", "--strictPort"],
+      "port": 8097
+    },
+    {
+      "name": "farol-id-claude-2",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--port", "8098", "--strictPort"],
+      "port": 8098
+    }
+  ]
+}

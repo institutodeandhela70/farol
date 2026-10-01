@@ -1,0 +1,222 @@
+import { createClient } from "npm:@supabase/supabase-js@2";
+import { logIntegrationCall } from "../_shared/integrationLog.ts";
+
+const ASAAS_BASE_URL: Record<string, string> = {
+  sandbox: "https://api-sandbox.asaas.com/v3",
+  production: "https://api.asaas.com/v3",
+};
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+  });
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: CORS_HEADERS });
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const admin = createClient(supabaseUrl, serviceRoleKey);
+  const startedAt = Date.now();
+
+  let integrationId: string | undefined;
+  let workspaceId: string | null = null;
+
+  const log = (params: { status: "success" | "error"; statusCode: number; response?: unknown; errorMessage?: string }) =>
+    logIntegrationCall(admin, {
+      workspaceId,
+      integrationId: integrationId ?? null,
+      provider: "asaas",
+      direction: "outbound",
+      eventType: "sync",
+      request: { integration_id: integrationId },
+      durationMs: Date.now() - startedAt,
+      ...params,
+    });
+
+  const markError = async (message: string) => {
+    if (!integrationId) return;
+    await admin
+      .from("integrations")
+      .update({ status: "error", last_error: message.slice(0, 500) })
+      .eq("id", integrationId);
+    await log({ status: "error", statusCode: 500, errorMessage: message });
+  };
+
+  try {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      await log({ status: "error", statusCode: 401, errorMessage: "missing authorization" });
+      return json({ error: "missing authorization" }, 401);
+    }
+
+    const body = await req.json();
+    integrationId = body?.integration_id;
+    if (!integrationId) {
+      await log({ status: "error", statusCode: 400, errorMessage: "integration_id required" });
+      return json({ error: "integration_id required" }, 400);
+    }
+
+    // service_role_key não é confiável pra essa checagem (o gateway já não aceita
+    // o formato novo, e o valor exposto em runtime pode divergir do JWT legado).
+    // Segredo interno próprio, guardado como Edge Function Secret + no Vault.
+    const internalToken = Deno.env.get("FAROL_INTERNAL_TOKEN");
+    const isTrustedInternalCall = !!internalToken && authHeader.replace(/^Bearer\s+/i, "") === internalToken;
+
+    if (!isTrustedInternalCall) {
+      // Chamada de usuário (clique manual) — confere sessão + participação no workspace.
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+
+      const { data: userData, error: userError } = await userClient.auth.getUser();
+      if (userError || !userData.user) {
+        await markError(`Sessão inválida ao sincronizar: ${userError?.message ?? "sem usuário"}`);
+        return json({ error: "invalid session" }, 401);
+      }
+
+      const { data: integrationCheck } = await admin
+        .from("integrations")
+        .select("workspace_id")
+        .eq("id", integrationId)
+        .maybeSingle();
+      if (!integrationCheck) {
+        await log({ status: "error", statusCode: 404, errorMessage: "integration not found" });
+        return json({ error: "integration not found" }, 404);
+      }
+      workspaceId = integrationCheck.workspace_id;
+
+      const { data: membership } = await admin
+        .from("workspace_members")
+        .select("id")
+        .eq("workspace_id", integrationCheck.workspace_id)
+        .eq("user_id", userData.user.id)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (!membership) {
+        await markError("Usuário não é membro ativo do workspace desta integração.");
+        return json({ error: "forbidden" }, 403);
+      }
+    }
+    // Chamada interna (cron via pg_net, autenticada com a service role key) já é
+    // confiável por natureza, não precisa checar membership de usuário.
+
+    const { data: integration, error: integrationError } = await admin
+      .from("integrations")
+      .select("id, workspace_id, config")
+      .eq("id", integrationId)
+      .single();
+    if (integrationError || !integration) {
+      await log({ status: "error", statusCode: 404, errorMessage: "integration not found" });
+      return json({ error: "integration not found" }, 404);
+    }
+    workspaceId = integration.workspace_id;
+
+    const { data: secret, error: secretError } = await admin
+      .from("integration_secrets")
+      .select("api_key")
+      .eq("integration_id", integrationId)
+      .maybeSingle();
+    if (secretError || !secret) {
+      await markError("Nenhuma API key salva para esta integração.");
+      return json({ error: "no api key saved" }, 400);
+    }
+
+    const environment = integration.config?.environment === "production" ? "production" : "sandbox";
+    const baseUrl = ASAAS_BASE_URL[environment];
+
+    let asaasRes: Response;
+    try {
+      asaasRes = await fetch(`${baseUrl}/payments?limit=100`, {
+        headers: {
+          access_token: secret.api_key,
+          "User-Agent": "FarolID",
+          "Content-Type": "application/json",
+        },
+      });
+    } catch (fetchErr) {
+      await markError(`Falha de rede ao chamar a Asaas (${environment}): ${String(fetchErr)}`);
+      return json({ error: "network error contacting asaas", detail: String(fetchErr) }, 502);
+    }
+
+    if (!asaasRes.ok) {
+      const errText = await asaasRes.text();
+      await markError(`HTTP ${asaasRes.status} (${environment}): ${errText || "sem corpo de resposta"}`);
+      return json({ error: "asaas request failed", detail: errText }, 502);
+    }
+
+    const asaasData = await asaasRes.json();
+    const payments = (asaasData.data ?? []) as Record<string, unknown>[];
+
+    const asaasHeaders = {
+      access_token: secret.api_key,
+      "User-Agent": "FarolID",
+      "Content-Type": "application/json",
+    };
+
+    // O payload de /payments só traz o id do cliente, não o nome — busca cada
+    // cliente único para exibir/pesquisar por nome de verdade no dashboard.
+    const customerIds = Array.from(
+      new Set(payments.map((p) => p.customer).filter((id): id is string => typeof id === "string")),
+    );
+    const customerNames = new Map<string, string>();
+    await Promise.all(
+      customerIds.map(async (customerId) => {
+        try {
+          const res = await fetch(`${baseUrl}/customers/${customerId}`, { headers: asaasHeaders });
+          if (!res.ok) return;
+          const customer = await res.json();
+          if (customer?.name) customerNames.set(customerId, customer.name);
+        } catch {
+          // Sem nome, cai no fallback abaixo (mostra o id do cliente).
+        }
+      }),
+    );
+
+    const charges = payments.map((c) => ({
+      workspace_id: integration.workspace_id,
+      external_id: c.id,
+      customer_name: (typeof c.customer === "string" && customerNames.get(c.customer)) || c.customer || null,
+      value: c.value ?? 0,
+      status: c.status ?? "UNKNOWN",
+      due_date: c.dueDate ?? null,
+      payment_date: c.paymentDate ?? null,
+      updated_at: new Date().toISOString(),
+    }));
+
+    if (charges.length > 0) {
+      const { error: upsertError } = await admin
+        .from("asaas_charges")
+        .upsert(charges, { onConflict: "workspace_id,external_id" });
+      if (upsertError) {
+        await markError(`Falha ao gravar cobranças: ${upsertError.message}`);
+        return json({ error: "failed to store charges", detail: upsertError.message }, 500);
+      }
+    }
+
+    await admin
+      .from("integrations")
+      .update({ status: "connected", last_synced_at: new Date().toISOString(), last_error: null })
+      .eq("id", integrationId);
+
+    await log({ status: "success", statusCode: 200, response: { synced: charges.length } });
+    return json({ synced: charges.length });
+  } catch (err) {
+    if (integrationId) {
+      await markError(`Erro inesperado: ${String(err)}`);
+    } else {
+      await log({ status: "error", statusCode: 500, errorMessage: String(err) });
+    }
+    return json({ error: String(err) }, 500);
+  }
+});
