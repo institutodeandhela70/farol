@@ -31,7 +31,7 @@ function formatDocument(doc: string | null | undefined): string {
 }
 
 const ORIGIN_LABEL: Record<string, string> = { mes: "Venda do mês", outros: "Venda de outros meses", sem_negocio: "Sem negócio vinculado" };
-const SITUATION_LABEL: Record<string, string> = { recebido: "Recebido", a_vencer: "A vencer", vencido: "Vencido" };
+const SITUATION_LABEL: Record<string, string> = { recebido: "Recebido", a_vencer: "A vencer", vencido: "Vencido", a_receber: "A receber" };
 const PIPELINE_LABEL: Record<string, string> = { contratos: "Contratos", hubla_tmb: "Hubla & TMB" };
 const GROUP_LABEL: Record<string, string> = { high: "High ticket", demais: "Demais", fora_dos_6: "Fora dos 6" };
 const TREATMENT_LABEL: Record<string, string> = {
@@ -86,12 +86,14 @@ const COLUMNS: Record<Drill["domain"], Col[]> = {
     { key: "grupo", label: "Grupo", defaultOn: false, render: (r) => GROUP_LABEL[r.grupo ?? ""] ?? r.grupo, csv: (r) => GROUP_LABEL[r.grupo ?? ""] ?? r.grupo },
     { key: "owner", label: "Vendedor", sort: "owner", defaultOn: true, render: (r, c) => c.ownerName(r.owner_id), csv: (r, c) => c.ownerName(r.owner_id) },
     { key: "closer", label: "Closer", defaultOn: false, render: (r, c) => (r.closer_owner_id ? c.ownerName(r.closer_owner_id) : ""), csv: (r, c) => (r.closer_owner_id ? c.ownerName(r.closer_owner_id) : "") },
-    { key: "dup", label: "Duplicado", defaultOn: false, render: (r) => (r.duplicado ? "Sim" : ""), csv: (r) => (r.duplicado ? "Sim" : "Não") },
+    { key: "dup", label: "Fora das Vendas (pagamento Hubla)", defaultOn: false, render: (r) => (r.duplicado ? "Sim" : ""), csv: (r) => (r.duplicado ? "Sim" : "Não") },
     { key: "valor", label: "Valor", sort: "amount", align: "right", defaultOn: true, render: (r) => <span className="font-semibold">{formatMoney(r.valor)}</span>, csv: (r) => r.valor },
     { key: "hubspot", label: "ID HubSpot", defaultOn: false, render: (r) => r.hubspot_id, csv: (r) => r.hubspot_id },
   ],
   receita: [
-    { key: "pagamento", label: "Pago em", sort: "pagamento", defaultOn: true, render: (r) => dayBR(r.pagamento), csv: (r) => dayBR(r.pagamento) },
+    { key: "competencia", label: "Competência", sort: "competencia", defaultOn: true, render: (r) => dayBR(r.competencia), csv: (r) => dayBR(r.competencia) },
+    { key: "situacao", label: "Situação", sort: "situacao", defaultOn: true, render: (r) => SITUATION_LABEL[r.situacao ?? ""] ?? r.situacao, csv: (r) => SITUATION_LABEL[r.situacao ?? ""] ?? r.situacao },
+    { key: "pagamento", label: "Pago em", sort: "pagamento", defaultOn: false, render: (r) => dayBR(r.pagamento), csv: (r) => dayBR(r.pagamento) },
     { key: "cliente", label: "Cliente", sort: "cliente", defaultOn: true, render: (r) => <span className="font-medium">{r.cliente}</span>, csv: (r) => r.cliente },
     { key: "email", label: "E-mail", defaultOn: true, render: (r) => r.contact_email, csv: (r) => r.contact_email },
     { key: "phone", label: "Telefone", defaultOn: true, render: (r) => r.contact_phone, csv: (r) => r.contact_phone },
@@ -111,7 +113,7 @@ const COLUMNS: Record<Drill["domain"], Col[]> = {
     { key: "venda", label: "Venda na IULI", defaultOn: false, render: (r) => r.venda_id, csv: (r) => r.venda_id },
     { key: "descricao", label: "Descrição na IULI", defaultOn: false, render: (r) => <span className="block max-w-72 truncate" title={r.descricao ?? ""}>{r.descricao}</span>, csv: (r) => r.descricao },
     { key: "previsto", label: "Valor previsto", align: "right", defaultOn: false, render: (r) => (r.valor_previsto != null ? formatMoney(r.valor_previsto) : ""), csv: (r) => r.valor_previsto },
-    { key: "valor", label: "Valor recebido", sort: "valor", align: "right", defaultOn: true, render: (r) => <span className="font-semibold">{formatMoney(r.valor)}</span>, csv: (r) => r.valor },
+    { key: "valor", label: "Valor (recebido ou previsto)", sort: "valor", align: "right", defaultOn: true, render: (r) => <span className="font-semibold">{formatMoney(r.valor)}</span>, csv: (r) => r.valor },
     { key: "iuli", label: "ID IULI", defaultOn: false, render: (r) => r.iuli_id, csv: (r) => r.iuli_id },
   ],
   caixa: [
@@ -386,12 +388,12 @@ export function DetailTable({ drill, compact = false, title }: { drill: Drill; c
               </select>
             </label>
           )}
-          {drill.domain === "caixa" && (
+          {(drill.domain === "caixa" || drill.domain === "receita") && (
             <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
               Situação
               <select className={selectClass} value={filters.situacao ?? ""} onChange={(e) => set({ situacao: e.target.value || null })}>
                 <option value="">Todas</option>
-                {Object.entries(SITUATION_LABEL).map(([v, l]) => (
+                {Object.entries(SITUATION_LABEL).filter(([v]) => (drill.domain === "receita" ? v === "recebido" || v === "a_receber" : v !== "a_receber")).map(([v, l]) => (
                   <option key={v} value={v}>
                     {l}
                   </option>

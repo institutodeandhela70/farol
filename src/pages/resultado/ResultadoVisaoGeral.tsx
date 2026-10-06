@@ -143,12 +143,12 @@ function Content() {
   const attention = [
     { show: k.foraQtd > 0, tone: "warn", text: `${neg(k.foraQtd)} (${formatMoney(k.foraTotal)}) na pipeline de Contratos são de produtos fora dos 6 e ficam fora das Vendas.`, to: "vendas", cta: "Ver em Vendas" },
     { show: k.semProduto > 0, tone: "warn", text: `${neg(k.semProduto)} da Hubla & TMB estão sem produto preenchido no HubSpot.`, to: "vendas", cta: "Ver em Vendas" },
-    { show: dupQtd > 0, tone: "info", text: `${neg(dupQtd)} (${formatMoney(dupTotal)}) da Hubla & TMB saíram das Vendas por repetirem um ganho de Contratos.`, to: "vendas", cta: "Ver quais" },
-    { show: revClassify.total > 0, tone: "warn", text: `${formatCount(revClassify.qtd)} entradas (${formatMoney(revClassify.total)}) estão em "a classificar" na IULI e ficam fora da Receita. Precisa categorizar.`, to: "receita", cta: "Ver em Receita" },
+    { show: dupQtd > 0, tone: "info", text: `${neg(dupQtd)} (${formatMoney(dupTotal)}) da Hubla & TMB são pagamentos de produtos dos 6 e ficam fora das Vendas (a venda é a de Contratos).`, to: "vendas", cta: "Ver quais" },
+    { show: revClassify.total > 0, tone: "warn", text: `${formatCount(revClassify.qtd)} lançamentos (${formatMoney(revClassify.total)}) estão em "a classificar" na IULI e ficam fora da Receita. Precisa categorizar.`, to: "receita", cta: "Ver em Receita" },
     { show: cashClassify.total > 0, tone: "warn", text: `${formatCount(cashClassify.qtd)} lançamentos (${formatMoney(cashClassify.total)}) com vencimento no período estão em "a classificar" e ficam fora do Caixa.`, to: "caixa", cta: "Ver em Caixa" },
     { show: k.sem > 0, tone: "info", text: `${formatMoney(k.sem)} da receita não tem negócio vinculado (contam na receita, mas não dá para datar a venda).`, to: "receita", cta: "Conciliar" },
     { show: !!agingOld && agingOld.total > 0, tone: "info", text: `${formatMoney(agingOld?.total ?? 0)} vencidos há mais de 1 ano: provável baixa não registrada na IULI, e não inadimplência.`, to: "caixa", cta: "Ver em Caixa" },
-    { show: noCategory.total > 0, tone: "info", text: `${formatMoney(noCategory.total)} de entradas ainda sem categoria carregada (a carga histórica continua em segundo plano).`, to: "receita", cta: "Ver em Receita" },
+    { show: noCategory.total > 0, tone: "info", text: `${formatMoney(noCategory.total)} de lançamentos ainda sem categoria carregada (a carga histórica continua em segundo plano).`, to: "receita", cta: "Ver em Receita" },
     { show: toReview > 0, tone: "warn", text: `${formatCount(toReview)} categorias da IULI ainda a revisar no de-para.`, to: "categorias", cta: "Revisar categorias" },
   ].filter((a) => a.show);
 
@@ -160,7 +160,7 @@ function Content() {
   return (
     <ResultShell
       title="Visão Geral"
-      description={`${period} · vendido (HubSpot) × entrou (IULI) × a receber (IULI)`}
+      description={`${period} · vendido (HubSpot) × faturado (IULI, competência) × caixa (IULI, vencimento)`}
       filters={
         <>
           <ResultPeriodBar filters={raw} set={set} />
@@ -199,14 +199,14 @@ function Content() {
             <div className="flex flex-col gap-3">
               <ul className="flex flex-col gap-1">
                 <BridgeRow label="Vendido no período" sub="negócios ganhos no HubSpot" value={k.vendido} max={bridgeMax} tone="neutral" onClick={() => openSales({ title: "Vendido no período" })} />
-                <BridgeRow label="Entrou de vendas do mês" sub="negócio ganho no mesmo mês do pagamento" value={k.mes} max={bridgeMax} tone="primary" onClick={() => open("receita", { title: "Entrou de vendas do mês", origem: "mes" })} />
-                <BridgeRow label="Entrou de vendas de outros meses" sub="parcelas de vendas anteriores" value={k.outros} max={bridgeMax} tone="blue" onClick={() => open("receita", { title: "Entrou de vendas de outros meses", origem: "outros" })} />
-                <BridgeRow label="Entrou sem negócio vinculado" sub="receita de produto que não consegui datar" value={k.sem} max={bridgeMax} tone="amber" onClick={() => open("receita", { title: "Entrou sem negócio vinculado", origem: "sem_negocio" })} />
+                <BridgeRow label="Faturado de vendas do mês" sub="competência no mesmo mês do ganho do negócio" value={k.mes} max={bridgeMax} tone="primary" onClick={() => open("receita", { title: "Faturado de vendas do mês", origem: "mes" })} />
+                <BridgeRow label="Faturado de vendas de outros meses" sub="negócio ganho em outro mês" value={k.outros} max={bridgeMax} tone="blue" onClick={() => open("receita", { title: "Faturado de vendas de outros meses", origem: "outros" })} />
+                <BridgeRow label="Faturado sem negócio vinculado" sub="receita de produto que não consegui datar" value={k.sem} max={bridgeMax} tone="amber" onClick={() => open("receita", { title: "Faturado sem negócio vinculado", origem: "sem_negocio" })} />
                 <BridgeRow label="A receber no período" sub="a vencer + vencido, com vencimento no período" value={k.aVencer + k.vencido} max={bridgeMax} tone="blue" onClick={() => open("caixa", { title: "A receber no período", situacoes: ["a_vencer", "vencido"] })} />
               </ul>
               {conversion !== null && (
                 <p className="text-sm text-muted-foreground">
-                  Do que foi vendido no período, {formatPercent(conversion, 1)} já entrou no mesmo mês. O resto entra em parcelas nos meses seguintes (veja a safra em Receita).
+                  Do que foi vendido no período, {formatPercent(conversion, 1)} já aparece faturado na IULI no mesmo mês. O resto é faturado nos meses seguintes (veja a safra em Receita).
                 </p>
               )}
             </div>
@@ -224,7 +224,7 @@ function Content() {
               data={chart}
               series={[
                 { key: "vendido", label: "Vendido", color: TONE.primary },
-                { key: "receita", label: "Receita (entrou)", color: TONE.blue },
+                { key: "receita", label: "Receita (faturada)", color: TONE.blue },
                 { key: "caixa", label: "Caixa (vencimento)", color: TONE.amber },
               ]}
               onBarClick={(row, key) => {

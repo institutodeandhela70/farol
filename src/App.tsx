@@ -39,6 +39,7 @@ import IntegrationLogs from "@/pages/IntegrationLogs";
 import ResultadoVisaoGeral from "@/pages/resultado/ResultadoVisaoGeral";
 import ResultadoVendas from "@/pages/resultado/ResultadoVendas";
 import ResultadoReceita from "@/pages/resultado/ResultadoReceita";
+import ResultadoPesquisa from "@/pages/resultado/ResultadoPesquisa";
 import ResultadoCaixa from "@/pages/resultado/ResultadoCaixa";
 import ResultadoProdutos from "@/pages/resultado/ResultadoProdutos";
 import ResultadoCategorias from "@/pages/resultado/ResultadoCategorias";
@@ -75,6 +76,7 @@ const customPages: Record<string, ComponentType> = {
   "resultado/vendas": ResultadoVendas,
   "resultado/receita": ResultadoReceita,
   "resultado/caixa": ResultadoCaixa,
+  "resultado/pesquisa": ResultadoPesquisa,
   "resultado/produtos": ResultadoProdutos,
   "resultado/categorias": ResultadoCategorias,
   "comercial/visao-geral": ComercialVisaoGeral,

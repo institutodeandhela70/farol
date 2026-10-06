@@ -8,6 +8,8 @@ import { addDaysISO, autoGrain, previousRange, todaySP, type Grain } from "@/lib
 export type ResultPreset = "mes_atual" | "7d" | "mes" | "custom";
 
 export interface ResultFilters {
+  /** Pesquisa: data de referência do período (padrão: competência). */
+  base: "competencia" | "vencimento" | "pagamento" | "ganho";
   preset: ResultPreset;
   from: string;
   to: string;
@@ -99,6 +101,7 @@ export function useResultFilters() {
       produto: csv(params.get("produto")),
       owner: params.get("vendedor") || null,
       excluirEE: false,
+      base: (["vencimento", "pagamento", "ganho"].includes(params.get("base") ?? "") ? params.get("base") : "competencia") as ResultFilters["base"],
     };
   }, [params]);
 

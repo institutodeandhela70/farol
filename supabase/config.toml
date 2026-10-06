@@ -407,6 +407,15 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 [functions.hubla-webhook]
 verify_jwt = false
 
+# TMB: o webhook confere o cabeçalho x-tmb-token com o segredo do webhook guardado
+# no banco; o sync-tmb confere o token interno do cron ou a sessão do usuário.
+# Sem isto a plataforma barrava as duas com 401 (JWT inválido) antes do código rodar.
+[functions.tmb-webhook]
+verify_jwt = false
+
+[functions.sync-tmb]
+verify_jwt = false
+
 # Funções de sincronização também precisam ser chamáveis pelo cron interno
 # (sem JWT de usuário) — autenticação própria dentro da função (JWT de usuário
 # OU o segredo interno FAROL_INTERNAL_TOKEN).

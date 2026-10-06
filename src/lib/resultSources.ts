@@ -34,7 +34,7 @@ const CX = {
   map: farol("iuli_category_map", "De-para categoria da IULI → produto"),
 };
 const RECEITA_RULE =
-  "Receita = o que entrou na IULI: títulos com baixa, pelo valor recebido, na data do pagamento. Só categorias de produto (de-para em Categorias). Cada entrada é ligada ao negócio ganho do HubSpot (pipelines Contratos e Hubla & TMB) pelo cliente e pelo produto; a data do ganho do negócio diz se a venda é do mês da entrada ou de outro mês.";
+  "Receita = o que foi faturado na IULI, pela DATA DE COMPETÊNCIA (a venda que já está na IULI, tenha o dinheiro sido creditado ou não). Entram os títulos de categoria de produto com e sem baixa: com baixa = já recebido; sem baixa = a receber (o dinheiro entra no vencimento, que é o Caixa). Valor: recebido = valor pago; a receber = valor previsto. Cada título é ligado ao negócio ganho do HubSpot (para os produtos dos 6, só Contratos) pelo cliente e produto; a data do ganho diz se a venda é do mês da competência ou de outro mês.";
 const RX = {
   pago: rec("itens[].valor_pago", "Valor recebido"),
   pagamento: rec("itens[].pagamento", "Data do pagamento"),
@@ -44,7 +44,7 @@ const RX = {
   links: farol("receita_links", "Vínculo entrada × negócio (atualizado de hora em hora)"),
 };
 const LINK_NOTE =
-  "Vínculo: nome do cliente da IULI igual ao do negócio (ou a uma das pessoas de um combo \"A e B\"), mesmo produto; vale o negócio ganho mais próximo da data da entrada (até 45 dias depois). Sem negócio do mesmo cliente e produto, a entrada continua contando, só não dá para datar a venda.";
+  "Vínculo: nome do cliente da IULI igual ao do negócio (ou a uma das pessoas de um combo \"A e B\"), mesmo produto; para os produtos dos 6 só vale negócio da pipeline de Contratos (a data do ganho é a da venda, não a do pagamento na Hubla); vale o negócio ganho mais próximo da data da entrada (até 45 dias depois). Sem negócio do mesmo cliente e produto, a entrada continua contando, só não dá para datar a venda.";
 const CAIXA_RULE =
   "Caixa = receitas da IULI pela data de vencimento. Só entram categorias de produto (de-para em Categorias). Recebido = valor pago; a vencer e vencido = valor previsto. Vencido = sem baixa e com vencimento anterior a hoje (fuso de São Paulo).";
 
@@ -52,9 +52,21 @@ const SP = "Dia do ganho no fuso de São Paulo.";
 const SCOPE =
   "Só negócios ganhos. High ticket = produtos dos 6 (MI, IPM, Dynastia, Inspiratori, PI, Dubai) e Combo, em Contratos ou na Hubla & TMB. Demais = Hubla & TMB de outros produtos. Os produtos de Contratos que não são dos 6 ficam fora da soma.";
 const DEDUPE =
-  "Negócio da Hubla & TMB de produto dos 6 que repete um ganho de Contratos (mesmo cliente e mesmo produto, até a janela de dias configurada) sai da soma para não contar duas vezes.";
+  "Para os produtos dos 6, a venda e a data do ganho são as da pipeline de Contratos. Na Hubla & TMB o negócio é criado a cada pagamento (cada parcela vira um negócio, com closedate = momento do pagamento), então esses negócios não entram nas Vendas. Exceção: produto marcado \"Contar também a Hubla & TMB como venda\" (hoje Dubai e Combo, que não têm ganho em Contratos), que ainda passa pela regra de duplicidade com Contratos.";
 
 export const RESULT_SOURCES = {
+  pesquisa: (): DataSource => ({
+    title: "Pesquisa de lançamentos",
+    fields: [CX.cliente, CX.categoria, CX.map, CX.due, RX.pagamento, CX.valor, RX.closedate, RX.dealname, RX.links],
+    rule: "Cada linha é um lançamento (título a receber) de categoria de produto da IULI, de jan/2025 em diante. A data do período pode ser a competência (padrão), o vencimento, o pagamento ou a data do ganho do negócio de Contratos ligado ao lançamento. Para os produtos dos 6, só vale negócio de Contratos.",
+    note: "Como o lançamento é ligado ao negócio, nesta ordem: nome do cliente + produto; CPF igual (CPF do cliente na Hubla/TMB = CPF do negócio); e-mail igual (e-mail da Hubla/TMB = e-mail do contato do negócio); valor exato + data (até 30 dias), só quando há um único candidato. O CPF e o e-mail vêm da Hubla/TMB e do HubSpot; a IULI não nos entrega o CPF.",
+  }),
+  missing: (): DataSource => ({
+    title: "Vendas que faltam em Contratos",
+    fields: [F.dealname, F.produtoContratos, F.produtoHubla, F.pipeline, F.won, RX.pago, RX.pagamento, RX.dealname, CX.categoria, CX.map],
+    rule: "Para os produtos dos 6, a venda é o negócio ganho em Contratos. A lista junta os clientes com pagamento na Hubla & TMB (negócios ganhos no período) e/ou título faturado na IULI (competência no período) de produto dos 6 que NÃO têm negócio ganho de Contratos do mesmo cliente e produto. Situação: \"não existe\" = nenhum negócio do cliente/produto em Contratos; \"não ganho\" = existe, mas está em outra etapa (etapa e valor informados).",
+    note: "Nomes casados por igualdade, nome contido (10+ letras) ou primeiro e último nome (a Hubla abrevia). Valor estimado = o maior entre Hubla & TMB e IULI.",
+  }),
   ovSales: (): DataSource => ({
     title: "Vendas (visão geral)",
     fields: [F.amount, F.won, F.closedate, F.pipeline, F.produtoContratos, F.produtoHubla, F.catalog],
@@ -75,7 +87,7 @@ export const RESULT_SOURCES = {
   ovBridge: (): DataSource => ({
     title: "Do vendido ao que entra",
     fields: [F.amount, F.closedate, RX.pago, RX.pagamento, CX.due, CX.valor],
-    rule: "Vendido = negócios ganhos no período (HubSpot). Entrou = receita do período (IULI, por data de pagamento) separada por mês da venda. A receber = títulos de produto com vencimento no período que ainda não tiveram baixa. São três datas diferentes (ganho, pagamento, vencimento), por isso não fecham entre si: a ponte mostra o caminho, não uma conta.",
+    rule: "Vendido = negócios ganhos no período (HubSpot). Faturado = receita do período (IULI, por data de competência) separada por mês da venda. A receber = títulos de produto com vencimento no período que ainda não tiveram baixa. São três datas diferentes (ganho, competência, vencimento), por isso não fecham entre si: a ponte mostra o caminho, não uma conta.",
   }),
   ovChart: (): DataSource => ({
     title: "Vendas × Receita × Caixa por mês",
@@ -90,7 +102,7 @@ export const RESULT_SOURCES = {
   ovAttention: (): DataSource => ({
     title: "O que precisa de atenção",
     fields: [F.catalog, CX.map, RX.links, CX.status],
-    rule: "Pendências que afetam a qualidade dos números: produtos fora dos 6, negócios removidos por duplicidade, receita a classificar, entradas sem negócio, vencido antigo e categorias a revisar.",
+    rule: "Pendências que afetam a qualidade dos números: produtos fora dos 6, pagamentos da Hubla & TMB de produtos dos 6 (fora das Vendas), receita a classificar, entradas sem negócio, vencido antigo e categorias a revisar.",
   }),
   revTotal: (): DataSource => ({
     title: "Receita do período",
@@ -101,13 +113,13 @@ export const RESULT_SOURCES = {
   revMes: (): DataSource => ({
     title: "Receita de vendas do mês",
     fields: [RX.pago, RX.pagamento, RX.closedate, RX.dealname, RX.links],
-    rule: "Entradas cujo negócio foi ganho no MESMO mês do pagamento.",
+    rule: "Títulos cuja competência é do mesmo mês em que o negócio foi ganho no HubSpot.",
     note: LINK_NOTE,
   }),
   revOutros: (): DataSource => ({
     title: "Receita de vendas de outros meses",
     fields: [RX.pago, RX.pagamento, RX.closedate, RX.dealname, RX.links],
-    rule: "Entradas cujo negócio foi ganho em OUTRO mês (parcelas de vendas anteriores, por exemplo).",
+    rule: "Títulos cuja competência é de um mês diferente do ganho do negócio (parcelas ou renovações de vendas anteriores, por exemplo).",
     note: LINK_NOTE,
   }),
   revSem: (): DataSource => ({
@@ -124,7 +136,7 @@ export const RESULT_SOURCES = {
   revSafra: (): DataSource => ({
     title: "Safra",
     fields: [RX.pago, RX.pagamento, RX.closedate, RX.links],
-    rule: "Cada linha é o mês da entrada; cada coluna, o mês em que a venda foi ganha no HubSpot. Mostra de quando vem o dinheiro que entra em cada mês. Usa os 6 meses até a data final do filtro.",
+    rule: "Cada linha é o mês da competência (faturamento na IULI); cada coluna, o mês em que a venda foi ganha no HubSpot. Mostra de quando são as vendas que estão sendo faturadas em cada mês. Usa os 6 meses até a data final do filtro.",
   }),
   revProducts: (): DataSource => ({
     title: "Receita por produto",
@@ -244,7 +256,7 @@ export const RESULT_SOURCES = {
     note: SP,
   }),
   duplicates: (): DataSource => ({
-    title: "Removidos por duplicidade",
+    title: "Pagamentos da Hubla & TMB de produtos dos 6",
     fields: [F.dealname, F.produtoHubla, F.produtoContratos, F.closedate, F.settings],
     rule: DEDUPE,
     note: "O cliente é comparado pelo nome do negócio (sem a etiqueta entre colchetes e sem acento).",

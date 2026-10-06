@@ -13,6 +13,7 @@ import { ClickBarChart, ClickBarList, KpiTile, SplitBar } from "@/components/res
 import { DetailTable } from "@/components/result/DetailTable";
 import { DrillProvider, useDrill } from "@/components/result/DrillContext";
 import { ResultPeriodBar, ResultShell } from "@/components/result/ResultUI";
+import { MissingSales } from "@/components/result/MissingSales";
 import { TONE } from "@/components/iuli/iuliTheme";
 
 const PIPELINE_LABEL: Record<string, string> = { contratos: "Contratos", hubla_tmb: "Hubla & TMB" };
@@ -278,11 +279,11 @@ function Content() {
       </div>
 
       <Panel
-        title="Removidos por duplicidade com Contratos"
+        title="Pagamentos da Hubla & TMB de produtos dos 6 (fora das Vendas)"
         info={S.duplicates()}
         action={
           dupQtd ? (
-            <button type="button" className="text-sm font-medium text-primary underline underline-offset-2" onClick={() => open({ title: "Removidos por duplicidade", subtitle: period, onlyDuplicates: true, grupos: ["high", "demais", "fora_dos_6"] })}>
+            <button type="button" className="text-sm font-medium text-primary underline underline-offset-2" onClick={() => open({ title: "Pagamentos da Hubla & TMB dos 6 (fora das Vendas)", subtitle: period, onlyDuplicates: true, grupos: ["high", "demais", "fora_dos_6"] })}>
               {neg(dupQtd)} · {formatMoney(dupTotal)} · ver negócios
             </button>
           ) : undefined
@@ -293,7 +294,7 @@ function Content() {
         ) : dupQtd ? (
           <div className="flex flex-col gap-3">
             <p className="text-sm text-muted-foreground">
-              Negócios da Hubla &amp; TMB de produto dos 6 que repetem um ganho de Contratos (mesmo cliente e produto, até {settings.data?.dedupe_days ?? 90} dias de diferença) ficam fora da soma para não contar a mesma venda duas vezes.
+              Na Hubla &amp; TMB o negócio nasce a cada pagamento (a data do ganho é o momento do pagamento, e cada parcela vira um negócio). Para os produtos dos 6, a venda e a data do ganho são as da pipeline de Contratos; por isso esses pagamentos não entram nas Vendas. Eles entram na Receita e no Caixa.
             </p>
             <ul className="flex flex-wrap gap-2 text-sm">
               {(duplicates.data ?? []).map((d) => (
@@ -301,7 +302,7 @@ function Content() {
                   <button
                     type="button"
                     className="rounded-full border border-border bg-muted px-3 py-1 hover:bg-accent"
-                    onClick={() => open({ title: `Removidos por duplicidade · ${d.produto}`, subtitle: period, onlyDuplicates: true, produto: [d.produto], grupos: ["high", "demais", "fora_dos_6"] })}
+                    onClick={() => open({ title: `Pagamentos da Hubla & TMB · ${d.produto}`, subtitle: period, onlyDuplicates: true, produto: [d.produto], grupos: ["high", "demais", "fora_dos_6"] })}
                   >
                     {d.produto}: {formatCount(d.qtd)} · {formatMoney(d.total)}
                   </button>
@@ -310,9 +311,11 @@ function Content() {
             </ul>
           </div>
         ) : (
-          <EmptyState>Nenhum negócio removido por duplicidade no período.</EmptyState>
+          <EmptyState>Nenhum pagamento da Hubla & TMB de produto dos 6 no período.</EmptyState>
         )}
       </Panel>
+
+      <MissingSales filters={filters} />
 
       <Panel title="Base de dados" info={S.deals()} action={<span className="text-sm text-muted-foreground">Todos os negócios que formam os números acima</span>}>
         <DetailTable drill={{ ...base, title: "Base de dados de vendas", grupos: ["high", "demais"] }} />

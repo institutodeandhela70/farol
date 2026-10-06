@@ -101,6 +101,7 @@ export interface DetailRow {
   venda_id?: number | null;
   descricao?: string | null;
   origem?: string | null;
+  competencia?: string | null;
 }
 
 export interface DetailPage {
@@ -155,6 +156,7 @@ function mapRow(domain: Domain, r: Raw): DetailRow {
     nf_numero: str(r.nf_numero),
     venda_id: numOrNull(r.venda_id),
     descricao: str(r.descricao),
+    competencia: str(r.competencia),
     origem: str(r.origem),
   };
 }
@@ -213,6 +215,7 @@ export function buildArgs(ws: string, d: Drill, t: TableFilters, q: DetailQuery)
         p_tratamento: d.tratamento === undefined ? "soma" : d.tratamento,
         p_origem: t.origem ?? d.origem ?? null,
         p_mes_venda: d.mesVenda ?? null,
+        p_situacoes: t.situacao ? [t.situacao] : d.situacoes ?? null,
         p_integration_ids: integrations,
         p_categoria: t.categoria ?? d.categoria ?? null,
       },

@@ -49,6 +49,14 @@ export default function ResultadoProdutos() {
     await refresh();
   };
 
+  const toggleHubla = async (produto: string, on: boolean) => {
+    if (!ws) return;
+    setMessage(null);
+    const { error } = await supabase.from("sales_product_catalog").update({ count_hubla: on }).eq("workspace_id", ws).eq("produto", produto);
+    if (error) return fail(error);
+    await refresh();
+  };
+
   const addProduct = async () => {
     const name = newProduct.trim();
     if (!ws || !name) return;
@@ -122,7 +130,7 @@ export default function ResultadoProdutos() {
   };
 
   return (
-    <ResultShell title="Produtos" description="Quais produtos são dos 6 (high ticket), o de-para dos nomes do HubSpot e a regra de duplicidade">
+    <ResultShell title="Produtos" description="Quais produtos são dos 6 (high ticket), o de-para dos nomes do HubSpot e os pagamentos da Hubla &amp; TMB">
       {!canEdit && <WarnNote>Só donos e administradores do workspace podem editar. Você está vendo em modo leitura.</WarnNote>}
       {message && (
         <p role="status" className={cn("text-sm font-medium", message.kind === "ok" ? "text-primary" : "text-destructive")}>
@@ -137,21 +145,35 @@ export default function ResultadoProdutos() {
           <div className="flex flex-col gap-4">
             <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {(catalog.data ?? []).map((c) => (
-                <li key={c.produto} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
-                  <label className="flex min-h-9 items-center gap-2.5 text-sm font-medium">
-                    <input
-                      type="checkbox"
-                      className="size-4 accent-[hsl(var(--primary))]"
-                      checked={c.is_high}
-                      disabled={!canEdit}
-                      onChange={(e) => toggleHigh(c.produto, e.target.checked)}
-                    />
-                    {c.produto}
-                  </label>
-                  {canEdit && (
-                    <button type="button" className="text-xs text-muted-foreground underline underline-offset-2 hover:text-destructive" onClick={() => removeProduct(c.produto)}>
-                      remover
-                    </button>
+                <li key={c.produto} className="flex flex-col gap-1.5 rounded-lg border border-border px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="flex min-h-9 items-center gap-2.5 text-sm font-medium">
+                      <input
+                        type="checkbox"
+                        className="size-4 accent-[hsl(var(--primary))]"
+                        checked={c.is_high}
+                        disabled={!canEdit}
+                        onChange={(e) => toggleHigh(c.produto, e.target.checked)}
+                      />
+                      {c.produto}
+                    </label>
+                    {canEdit && (
+                      <button type="button" className="text-xs text-muted-foreground underline underline-offset-2 hover:text-destructive" onClick={() => removeProduct(c.produto)}>
+                        remover
+                      </button>
+                    )}
+                  </div>
+                  {c.is_high && (
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        className="size-3.5 accent-[hsl(var(--primary))]"
+                        checked={c.count_hubla}
+                        disabled={!canEdit}
+                        onChange={(e) => toggleHubla(c.produto, e.target.checked)}
+                      />
+                      Contar também a Hubla &amp; TMB como venda
+                    </label>
                   )}
                 </li>
               ))}
@@ -169,12 +191,12 @@ export default function ResultadoProdutos() {
                 </Button>
               </div>
             )}
-            <p className="text-sm text-muted-foreground">Marcado = conta como high ticket em Contratos e na Hubla &amp; TMB. Desmarcado em Contratos = vai para "fora dos 6" (fora da soma).</p>
+            <p className="text-sm text-muted-foreground">Marcado = high ticket. A venda e a data do ganho são as da pipeline de Contratos; os negócios da Hubla &amp; TMB desses produtos são pagamentos (um por parcela) e ficam fora das Vendas. "Contar também a Hubla &amp; TMB como venda" só serve para produto que não tem ganho em Contratos (hoje Dubai e Combo). Produto não marcado em Contratos vai para "fora dos 6" (fora da soma).</p>
           </div>
         )}
       </Panel>
 
-      <Panel title="Regra de duplicidade (Hubla & TMB × Contratos)">
+      <Panel title="Produtos que contam a Hubla & TMB: regra de duplicidade com Contratos">
         {settings.isLoading ? (
           <LoadingBlock className="h-16" />
         ) : (
@@ -187,7 +209,7 @@ export default function ResultadoProdutos() {
                 disabled={!canEdit}
                 onChange={(e) => saveSettings({ dedupe_enabled: e.target.checked })}
               />
-              Tirar da soma o negócio da Hubla &amp; TMB que repete um ganho de Contratos
+              Para os produtos com "Contar também a Hubla &amp; TMB": tirar da soma o negócio que repete um ganho de Contratos
             </label>
             <div className="flex flex-wrap items-end gap-2">
               <div className="flex flex-col gap-1.5">

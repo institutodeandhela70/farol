@@ -18,6 +18,7 @@ export const RESULT_SECTIONS: ShellSection[] = [
   { id: "resultado/vendas", label: "Vendas" },
   { id: "resultado/receita", label: "Receita" },
   { id: "resultado/caixa", label: "Caixa" },
+  { id: "resultado/pesquisa", label: "Pesquisa" },
   { id: "resultado/produtos", label: "Produtos" },
   { id: "resultado/categorias", label: "Categorias" },
 ];

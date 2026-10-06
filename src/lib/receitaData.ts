@@ -18,6 +18,7 @@ export type RevenueOrigin = "mes" | "outros" | "sem_negocio";
 
 export interface RevenueSummaryRow {
   origem: RevenueOrigin;
+  situacao: "recebido" | "a_receber";
   produto: string;
   qtd: number;
   total: number;
@@ -40,19 +41,6 @@ export interface RevenueOutRow {
   qtd: number;
   total: number;
 }
-export interface RevenueTitle {
-  empresa: string;
-  cliente: string | null;
-  categoria: string | null;
-  produto: string | null;
-  pagamento: string;
-  dia_ganho: string | null;
-  dealname: string | null;
-  pipeline_kind: "contratos" | "hubla_tmb" | null;
-  origem: RevenueOrigin;
-  valor: number;
-}
-
 const scope = (f: ResultFilters) => ({
   p_integration_ids: f.empresa !== "todas" ? [f.empresa] : null,
   p_excluir_ee: f.excluirEE,
@@ -102,15 +90,6 @@ export function useRevenueOut(ws: string | undefined, f: ResultFilters) {
     queryKey: ["revenue", "out", ws, f.from, f.to, f.empresa, f.excluirEE],
     enabled: !!ws,
     queryFn: async () => (await rpc<RevenueOutRow>("receita_fora", base(ws!, f))).map((r) => ({ ...r, qtd: n(r.qtd), total: n(r.total) })),
-  });
-}
-
-export function useRevenueTitles(ws: string | undefined, f: ResultFilters, opts: { origem?: RevenueOrigin | null; limit?: number } = {}) {
-  return useQuery({
-    queryKey: ["revenue", "titles", ws, ...key(f), opts.origem, opts.limit],
-    enabled: !!ws,
-    queryFn: async () =>
-      (await rpc<RevenueTitle>("receita_titulos", { ...withProduct(ws!, f), p_origem: opts.origem ?? null, p_limit: opts.limit ?? 15 })).map((r) => ({ ...r, valor: n(r.valor) })),
   });
 }
 
