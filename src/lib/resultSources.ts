@@ -54,6 +54,9 @@ const SCOPE =
 const DEDUPE =
   "Para os produtos dos 6, a venda e a data do ganho são as da pipeline de Contratos. Na Hubla & TMB o negócio é criado a cada pagamento (cada parcela vira um negócio, com closedate = momento do pagamento), então esses negócios não entram nas Vendas. Exceção: produto marcado \"Contar também a Hubla & TMB como venda\" (hoje Dubai e Combo, que não têm ganho em Contratos), que ainda passa pela regra de duplicidade com Contratos.";
 
+const REGRAS_DATA =
+  "Gratuito não é venda: negócio com Amount 0 ou com \"Informações para o financeiro\" = Gratuito / Gratuito (Premiação) fica de fora (Permuta com valor continua contando). Data da venda em Contratos = a maior entre a data do pagamento e a da assinatura do contrato; exceção D+2: pagou no mês anterior e assinou nos dias 1 ou 2 do mês seguinte, a venda fica no mês do pagamento. Sem data de assinatura, vale o Close Date.";
+
 export const RESULT_SOURCES = {
   pesquisa: (): DataSource => ({
     title: "Pesquisa de lançamentos",
@@ -208,7 +211,7 @@ export const RESULT_SOURCES = {
   total: (): DataSource => ({
     title: "Total vendido",
     fields: [F.amount, F.won, F.closedate, F.pipeline, F.produtoContratos, F.produtoHubla, F.roles, F.catalog],
-    rule: `${SCOPE} ${DEDUPE}`,
+    rule: `${SCOPE} ${DEDUPE} ${REGRAS_DATA}`,
     note: SP,
   }),
   high: (): DataSource => ({
