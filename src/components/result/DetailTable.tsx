@@ -93,6 +93,7 @@ const COLUMNS: Record<Drill["domain"], Col[]> = {
   receita: [
     { key: "competencia", label: "Competência", sort: "competencia", defaultOn: true, render: (r) => dayBR(r.competencia), csv: (r) => dayBR(r.competencia) },
     { key: "situacao", label: "Situação", sort: "situacao", defaultOn: true, render: (r) => SITUATION_LABEL[r.situacao ?? ""] ?? r.situacao, csv: (r) => SITUATION_LABEL[r.situacao ?? ""] ?? r.situacao },
+    { key: "due", label: "Vencimento", sort: "due_date", defaultOn: true, render: (r) => dayBR(r.due_date), csv: (r) => dayBR(r.due_date) },
     { key: "pagamento", label: "Pago em", sort: "pagamento", defaultOn: false, render: (r) => dayBR(r.pagamento), csv: (r) => dayBR(r.pagamento) },
     { key: "cliente", label: "Cliente", sort: "cliente", defaultOn: true, render: (r) => <span className="font-medium">{r.cliente}</span>, csv: (r) => r.cliente },
     { key: "email", label: "E-mail", defaultOn: true, render: (r) => r.contact_email, csv: (r) => r.contact_email },
@@ -102,7 +103,6 @@ const COLUMNS: Record<Drill["domain"], Col[]> = {
     { key: "categoria", label: "Categoria na IULI", sort: "categoria", defaultOn: true, render: (r) => r.categoria, csv: (r) => r.categoria },
     { key: "tratamento", label: "Tratamento", defaultOn: false, render: (r) => TREATMENT_LABEL[r.tratamento ?? ""] ?? r.tratamento, csv: (r) => TREATMENT_LABEL[r.tratamento ?? ""] ?? r.tratamento },
     { key: "empresa", label: "Empresa", sort: "empresa", defaultOn: true, render: (r) => r.empresa, csv: (r) => r.empresa },
-    { key: "due", label: "Vencimento", sort: "due_date", defaultOn: false, render: (r) => dayBR(r.due_date), csv: (r) => dayBR(r.due_date) },
     { key: "origem", label: "Origem", defaultOn: true, render: (r) => ORIGIN_LABEL[r.origem ?? ""] ?? r.origem, csv: (r) => ORIGIN_LABEL[r.origem ?? ""] ?? r.origem },
     { key: "dealname", label: "Negócio vinculado", defaultOn: true, render: (r) => r.dealname, csv: (r) => r.dealname },
     { key: "ganho", label: "Ganho em", sort: "dia_ganho", defaultOn: true, render: (r) => dayBR(r.dia_ganho), csv: (r) => dayBR(r.dia_ganho) },
@@ -162,6 +162,16 @@ function loadColumns(domain: string, cols: Col[]): string[] {
     const raw = window.localStorage.getItem(`farol:result:cols:${domain}`);
     if (raw) {
       const keys = (JSON.parse(raw) as string[]).filter((k) => cols.some((c) => c.key === k));
+      // Vencimento passou a ser coluna padrão da Receita: quem já tinha colunas salvas ganha ela uma vez.
+      const marker = `farol:result:cols:${domain}:due-v1`;
+      if (domain === "receita" && !window.localStorage.getItem(marker)) {
+        window.localStorage.setItem(marker, "1");
+        if (!keys.includes("due")) {
+          const at = keys.indexOf("situacao");
+          keys.splice(at >= 0 ? at + 1 : 1, 0, "due");
+          window.localStorage.setItem(`farol:result:cols:${domain}`, JSON.stringify(keys));
+        }
+      }
       if (keys.length) return keys;
     }
   } catch {
