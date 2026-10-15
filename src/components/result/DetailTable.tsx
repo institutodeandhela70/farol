@@ -63,6 +63,8 @@ const daysLate = (r: DetailRow, c: Ctx) => (r.situacao === "vencido" && r.due_da
 const COLUMNS: Record<Drill["domain"], Col[]> = {
   vendas: [
     { key: "dia", label: "Ganho em", sort: "dia", defaultOn: true, render: (r) => dayBR(r.dia), csv: (r) => dayBR(r.dia) },
+    { key: "pagamento", label: "Pago em", defaultOn: true, render: (r) => dayBR(r.data_pagamento), csv: (r) => dayBR(r.data_pagamento) },
+    { key: "assinatura", label: "Assinado em", defaultOn: true, render: (r) => dayBR(r.data_assinatura), csv: (r) => dayBR(r.data_assinatura) },
     { key: "cliente", label: "Cliente", sort: "dealname", defaultOn: true, render: (r) => <span className="font-medium">{r.cliente}</span>, csv: (r) => r.cliente },
     { key: "dealname", label: "Negócio", defaultOn: false, render: (r) => r.dealname, csv: (r) => r.dealname },
     { key: "email", label: "E-mail", defaultOn: true, render: (r) => r.contact_email, csv: (r) => r.contact_email },
@@ -171,6 +173,14 @@ function loadColumns(domain: string, cols: Col[]): string[] {
           keys.splice(at >= 0 ? at + 1 : 1, 0, "due");
           window.localStorage.setItem(`farol:result:cols:${domain}`, JSON.stringify(keys));
         }
+      }
+      // Vendas ganhou "Pago em" e "Assinado em" como colunas padrão: entram uma vez para quem já tinha colunas salvas.
+      const marker2 = `farol:result:cols:${domain}:datas-v1`;
+      if (domain === "vendas" && !window.localStorage.getItem(marker2)) {
+        window.localStorage.setItem(marker2, "1");
+        const at = keys.indexOf("dia");
+        for (const k of ["assinatura", "pagamento"]) if (!keys.includes(k)) keys.splice(at >= 0 ? at + 1 : 1, 0, k);
+        window.localStorage.setItem(`farol:result:cols:${domain}`, JSON.stringify(keys));
       }
       if (keys.length) return keys;
     }

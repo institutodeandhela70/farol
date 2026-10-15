@@ -88,6 +88,8 @@ export interface DetailRow {
   produto_raw?: string | null;
   grupo?: string | null;
   duplicado?: boolean;
+  data_pagamento?: string | null;
+  data_assinatura?: string | null;
   // receita / caixa
   empresa?: string | null;
   iuli_id?: number | null;
@@ -138,6 +140,8 @@ function mapRow(domain: Domain, r: Raw): DetailRow {
       dia_ganho: str(r.dia),
       grupo: str(r.grupo),
       duplicado: Boolean(r.duplicado),
+      data_pagamento: str(r.data_pagamento),
+      data_assinatura: str(r.data_assinatura),
     };
   }
   return {
