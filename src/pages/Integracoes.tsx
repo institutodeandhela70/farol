@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { saveIntegrationCredential } from "@/lib/integrations";
 import { IuliIntegrationDialog } from "@/components/iuli/IuliIntegrationDialog";
@@ -143,6 +144,9 @@ function DiagnosticsTable({ diagnostics }: { diagnostics: Diagnostics }) {
 }
 
 export default function Integracoes() {
+  const navigate = useNavigate();
+  const openLogs = (provider: string, integrationId?: string) =>
+    navigate(`/settings/integracoes-logs?provider=${provider}${integrationId ? `&integration=${integrationId}` : ""}`);
   const { workspace } = useWorkspace();
   const [loading, setLoading] = useState(true);
   const [openDialog, setOpenDialog] = useState<ProviderId | null>(null);
@@ -790,14 +794,22 @@ export default function Integracoes() {
                 </div>
               </div>
               {row && <Badge variant={statusVariant[row.status]}>{statusLabel[row.status]}</Badge>}
-              <Button
-                size="sm"
-                variant={row ? "outline" : "default"}
-                disabled={provider.comingSoon}
-                onClick={() => setOpenDialog(provider.id as ProviderId)}
-              >
-                {provider.comingSoon ? "Em breve" : row ? "Configurar" : "Conectar"}
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  className="flex-1"
+                  variant={row ? "outline" : "default"}
+                  disabled={provider.comingSoon}
+                  onClick={() => setOpenDialog(provider.id as ProviderId)}
+                >
+                  {provider.comingSoon ? "Em breve" : row ? "Configurar" : "Conectar"}
+                </Button>
+                {row && (
+                  <Button size="sm" variant="outline" onClick={() => openLogs(provider.id, provider.id === "iuli" ? undefined : row.id)}>
+                    Ver log
+                  </Button>
+                )}
+              </div>
             </div>
           );
         })}
@@ -828,6 +840,9 @@ export default function Integracoes() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant={statusVariant[row.status]}>{statusLabel[row.status]}</Badge>
+                  <Button size="sm" variant="outline" onClick={() => openLogs(provider.id, provider.id === "iuli" ? undefined : row.id)}>
+                    Ver log
+                  </Button>
                   <Button size="sm" variant="outline" onClick={() => setOpenDialog(provider.id)}>
                     Configurar
                   </Button>

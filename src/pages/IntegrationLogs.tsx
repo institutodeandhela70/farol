@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { useWorkspace } from "@/hooks/WorkspaceProvider";
 import { Input } from "@/components/ui/input";
@@ -7,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 
 interface LogRow {
   id: string;
+  integration_id: string | null;
   provider: string;
   direction: "inbound" | "outbound";
   event_type: string;
@@ -27,7 +29,14 @@ const PROVIDER_LABEL: Record<string, string> = {
   hubspot: "HubSpot",
   vsix: "VSIX",
   iuli: "IULI",
+  brevo: "Brevo",
 };
+
+interface IntegrationOption {
+  id: string;
+  provider: string;
+  label: string | null;
+}
 
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString("pt-BR");
@@ -37,11 +46,14 @@ const PAGE_SIZE = 50;
 
 export default function IntegrationLogs() {
   const { workspace } = useWorkspace();
+  const [searchParams] = useSearchParams();
   const [rows, setRows] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
-  const [providerFilter, setProviderFilter] = useState("all");
+  const [providerFilter, setProviderFilter] = useState(searchParams.get("provider") ?? "all");
+  const [integrationFilter, setIntegrationFilter] = useState(searchParams.get("integration") ?? "all");
+  const [integrations, setIntegrations] = useState<IntegrationOption[]>([]);
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<LogRow | null>(null);
@@ -66,8 +78,24 @@ export default function IntegrationLogs() {
   }, [workspace?.id]);
 
   useEffect(() => {
+    if (!workspace) return;
+    supabase
+      .from("integrations")
+      .select("id, provider, label")
+      .eq("workspace_id", workspace.id)
+      .then(({ data }) => setIntegrations((data as IntegrationOption[]) ?? []));
+  }, [workspace?.id]);
+
+  const integrationById = useMemo(() => new Map(integrations.map((i) => [i.id, i])), [integrations]);
+  const integrationName = (provider: string, integrationId: string | null) => {
+    const base = PROVIDER_LABEL[provider] ?? provider;
+    const label = integrationId ? integrationById.get(integrationId)?.label : null;
+    return label ? `${base} · ${label}` : base;
+  };
+
+  useEffect(() => {
     setPage(1);
-  }, [search, providerFilter, statusFilter]);
+  }, [search, providerFilter, integrationFilter, statusFilter]);
 
   useEffect(() => {
     if (!workspace) return;
@@ -78,6 +106,7 @@ export default function IntegrationLogs() {
       p_provider: providerFilter === "all" ? null : providerFilter,
       p_status: statusFilter === "all" ? null : statusFilter,
       p_search: search || null,
+      p_integration_id: integrationFilter === "all" ? null : integrationFilter,
     };
 
     supabase.rpc("integration_logs_summary", filters).then(({ data }) => {
@@ -88,12 +117,13 @@ export default function IntegrationLogs() {
     let query = supabase
       .from("integration_logs")
       .select(
-        "id, provider, direction, event_type, status, status_code, error_message, duration_ms, request_payload, response_payload, created_at",
+        "id, integration_id, provider, direction, event_type, status, status_code, error_message, duration_ms, request_payload, response_payload, created_at",
       )
       .eq("workspace_id", workspace.id);
 
     if (providerFilter !== "all") query = query.eq("provider", providerFilter);
     if (statusFilter !== "all") query = query.eq("status", statusFilter);
+    if (integrationFilter !== "all") query = query.eq("integration_id", integrationFilter);
     if (search) query = query.ilike("event_type", `%${search}%`);
 
     query
@@ -103,7 +133,7 @@ export default function IntegrationLogs() {
         setRows((data as LogRow[]) ?? []);
         setLoading(false);
       });
-  }, [workspace?.id, search, providerFilter, statusFilter, page]);
+  }, [workspace?.id, search, providerFilter, integrationFilter, statusFilter, page]);
 
   const totalPages = Math.max(1, Math.ceil(summary.total_count / PAGE_SIZE));
 
@@ -113,6 +143,23 @@ export default function IntegrationLogs() {
       <p className="mt-1 text-sm text-muted-foreground">
         Toda chamada recebida (webhooks) ou disparada (syncs/diagnósticos) pelas integrações deste workspace.
       </p>
+
+      {integrationFilter !== "all" && (
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-4 py-2 text-sm">
+          <span>
+            Mostrando só os logs de{" "}
+            <strong>
+              {integrationById.get(integrationFilter)
+                ? integrationName(integrationById.get(integrationFilter)!.provider, integrationFilter)
+                : "esta integração"}
+            </strong>
+            .
+          </span>
+          <button type="button" className="text-primary hover:underline" onClick={() => setIntegrationFilter("all")}>
+            Ver todas
+          </button>
+        </div>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-lg bg-muted p-4">
@@ -135,7 +182,10 @@ export default function IntegrationLogs() {
         <div className="flex gap-2">
           <select
             value={providerFilter}
-            onChange={(e) => setProviderFilter(e.target.value)}
+            onChange={(e) => {
+              setProviderFilter(e.target.value);
+              setIntegrationFilter("all");
+            }}
             className="h-10 rounded-md border border-input bg-background px-3 text-sm"
           >
             <option value="all">Todas as integrações</option>
@@ -144,6 +194,20 @@ export default function IntegrationLogs() {
                 {PROVIDER_LABEL[p] ?? p}
               </option>
             ))}
+          </select>
+          <select
+            value={integrationFilter}
+            onChange={(e) => setIntegrationFilter(e.target.value)}
+            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            <option value="all">Todas as contas</option>
+            {integrations
+              .filter((i) => providerFilter === "all" || i.provider === providerFilter)
+              .map((i) => (
+                <option key={i.id} value={i.id}>
+                  {integrationName(i.provider, i.id)}
+                </option>
+              ))}
           </select>
           <select
             value={statusFilter}
@@ -192,7 +256,7 @@ export default function IntegrationLogs() {
                   onClick={() => setSelected(r)}
                 >
                   <td className="px-4 py-2 text-muted-foreground">{formatDateTime(r.created_at)}</td>
-                  <td className="px-4 py-2">{PROVIDER_LABEL[r.provider] ?? r.provider}</td>
+                  <td className="px-4 py-2">{integrationName(r.provider, r.integration_id)}</td>
                   <td className="px-4 py-2 text-muted-foreground">
                     {r.direction === "inbound" ? "Recebida (webhook)" : "Disparada por nós"}
                   </td>
@@ -242,7 +306,7 @@ export default function IntegrationLogs() {
             <>
               <DialogHeader>
                 <DialogTitle>
-                  {PROVIDER_LABEL[selected.provider] ?? selected.provider} — {selected.event_type}
+                  {integrationName(selected.provider, selected.integration_id)} — {selected.event_type}
                 </DialogTitle>
                 <DialogDescription>
                   {formatDateTime(selected.created_at)} · {selected.direction === "inbound" ? "Webhook recebido" : "Chamada disparada por nós"}
