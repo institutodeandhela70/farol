@@ -37,6 +37,18 @@ async function hubspotFetch(url: string, init?: RequestInit): Promise<Response> 
 const OBJECT_TYPES = ["contacts", "companies", "deals", "meetings", "products"] as const;
 type ObjectType = (typeof OBJECT_TYPES)[number];
 
+// Propriedade de "última modificação" usada na busca incremental. Nos contatos
+// a HubSpot só preenche "lastmodifieddate" (hs_lastmodifieddate vem vazia), e
+// filtrar por uma propriedade vazia devolve 0 resultados sem dar erro — foi o
+// que travou os contatos desde 29/08.
+const MODIFIED_PROP: Record<ObjectType, string> = {
+  contacts: "lastmodifieddate",
+  companies: "hs_lastmodifieddate",
+  deals: "hs_lastmodifieddate",
+  meetings: "hs_lastmodifieddate",
+  products: "hs_lastmodifieddate",
+};
+
 const TABLE_BY_TYPE: Record<ObjectType, string> = {
   contacts: "hubspot_contacts",
   companies: "hubspot_companies",
@@ -534,14 +546,14 @@ Deno.serve(async (req) => {
           const body: Record<string, unknown> = {
             limit: 100,
             properties,
-            sorts: [{ propertyName: "hs_lastmodifieddate", direction: "ASCENDING" }],
+            sorts: [{ propertyName: MODIFIED_PROP[type], direction: "ASCENDING" }],
           };
           if (after) body.after = after;
           if (windowSince) {
             body.filterGroups = [
               {
                 filters: [
-                  { propertyName: "hs_lastmodifieddate", operator: "GTE", value: String(new Date(windowSince).getTime()) },
+                  { propertyName: MODIFIED_PROP[type], operator: "GTE", value: String(new Date(windowSince).getTime()) },
                 ],
               },
             ];
