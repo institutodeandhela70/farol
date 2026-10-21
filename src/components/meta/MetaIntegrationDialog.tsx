@@ -90,6 +90,21 @@ const REQUIRED_PERMISSIONS = [
 
 type Feedback = { type: "error" | "success"; text: string } | null;
 
+interface SyncProgress {
+  counts: { campaigns: number; adsets: number; ads: number; insights: number; breakdowns: number };
+  running: boolean;
+  loadedThrough: string | null;
+  error: string | null;
+}
+
+const DATASET_LABEL: Record<string, string> = {
+  campaigns: "Campanhas",
+  adsets: "Conjuntos",
+  ads: "Anúncios",
+  insights: "Métricas diárias (anúncio/dia)",
+  breakdowns: "Breakdowns (plataforma, idade/gênero, região)",
+};
+
 function expiryLabel(expiresAt?: number | null) {
   if (expiresAt === 0) return "Não expira";
   if (!expiresAt) return "—";
@@ -117,6 +132,8 @@ export function MetaIntegrationDialog({
   const [selIgs, setSelIgs] = useState<Set<string>>(new Set());
   const [savedAds, setSavedAds] = useState<AdAccountRow[]>([]);
   const [savedIgs, setSavedIgs] = useState<IgAccountRow[]>([]);
+  const [progress, setProgress] = useState<SyncProgress | null>(null);
+  const [adsSyncing, setAdsSyncing] = useState(false);
 
   const load = useCallback(async () => {
     if (!workspaceId) return;
@@ -153,6 +170,59 @@ export function MetaIntegrationDialog({
   useEffect(() => {
     load();
   }, [load]);
+
+  const loadProgress = useCallback(async () => {
+    if (!workspaceId || !integration) return;
+    const count = async (table: string) => {
+      const { count: c } = await supabase.from(table).select("*", { count: "exact", head: true }).eq("workspace_id", workspaceId);
+      return c ?? 0;
+    };
+    const [campaigns, adsets, ads, insights, breakdowns, state] = await Promise.all([
+      count("meta_campaigns"),
+      count("meta_adsets"),
+      count("meta_ads"),
+      count("meta_ad_insights_daily"),
+      count("meta_insights_breakdowns"),
+      supabase
+        .from("meta_sync_state")
+        .select("dataset, cursor_date, cycle_started_at, loaded_through, last_error, updated_at")
+        .eq("integration_id", integration.id),
+    ]);
+    const rows = state.data ?? [];
+    const recent = rows.some((r) => Date.now() - new Date(r.updated_at as string).getTime() < 3 * 60_000);
+    const inProgress = rows.some((r) => r.cursor_date || r.cycle_started_at);
+    const through = rows.filter((r) => r.dataset === "insights" && r.loaded_through).map((r) => r.loaded_through as string).sort()[0] ?? null;
+    setProgress({
+      counts: { campaigns, adsets, ads, insights, breakdowns },
+      running: recent && inProgress,
+      loadedThrough: through,
+      error: (rows.find((r) => r.last_error)?.last_error as string | undefined) ?? null,
+    });
+  }, [workspaceId, integration]);
+
+  // Enquanto a janela está aberta e há carga rodando, atualiza o andamento a cada 5s.
+  useEffect(() => {
+    if (!open || !integration) return;
+    loadProgress();
+    const t = setInterval(loadProgress, 5000);
+    return () => clearInterval(t);
+  }, [open, integration, loadProgress]);
+
+  const handleSyncAds = async () => {
+    if (!integration) return;
+    setAdsSyncing(true);
+    setFeedback(null);
+    const { data, error } = await supabase.functions.invoke("sync-meta-ads", {
+      body: { integration_id: integration.id, background: true, force: true },
+    });
+    setAdsSyncing(false);
+    if (error || data?.error) {
+      setFeedback({ type: "error", text: `Falha ao iniciar: ${data?.error ?? error?.message}` });
+      return;
+    }
+    setFeedback({ type: "success", text: "Sincronização iniciada em segundo plano. O histórico é carregado em lotes — pode fechar esta janela." });
+    await loadProgress();
+  };
 
   // Contas exibidas: as do último diagnóstico (se rodou agora) ou as já cadastradas.
   const ads: AdAccountRow[] = diagnosis?.ad_accounts ?? savedAds;
@@ -405,6 +475,28 @@ export function MetaIntegrationDialog({
               <Button onClick={handleSync} disabled={busy !== null || (ads.length === 0 && igs.length === 0)}>
                 {busy === "sync" ? "Salvando..." : "Salvar seleção e sincronizar"}
               </Button>
+
+              <div className="flex flex-col gap-2 rounded-lg border border-border p-3 text-sm">
+                <p className="font-medium">Campanhas e métricas</p>
+                {progress && (
+                  <ul className="text-xs text-muted-foreground">
+                    <li>{DATASET_LABEL.campaigns}: {progress.counts.campaigns.toLocaleString("pt-BR")}</li>
+                    <li>{DATASET_LABEL.adsets}: {progress.counts.adsets.toLocaleString("pt-BR")}</li>
+                    <li>{DATASET_LABEL.ads}: {progress.counts.ads.toLocaleString("pt-BR")}</li>
+                    <li>{DATASET_LABEL.insights}: {progress.counts.insights.toLocaleString("pt-BR")} linhas</li>
+                    <li>{DATASET_LABEL.breakdowns}: {progress.counts.breakdowns.toLocaleString("pt-BR")} linhas</li>
+                    {progress.loadedThrough && <li>Métricas carregadas até {new Date(`${progress.loadedThrough}T12:00:00`).toLocaleDateString("pt-BR")}</li>}
+                  </ul>
+                )}
+                {progress?.running && <p className="text-xs text-primary">Carregando em segundo plano...</p>}
+                {progress?.error && <p className="text-xs text-destructive">Último erro: {progress.error}</p>}
+                <Button variant="outline" onClick={handleSyncAds} disabled={adsSyncing || progress?.running}>
+                  {adsSyncing ? "Iniciando..." : progress?.running ? "Sincronização em andamento" : "Sincronizar campanhas e métricas"}
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Histórico a partir de 01/01/2025, em lotes. Depois disso atualiza sozinho a cada 3 horas, relendo os últimos 28 dias.
+                </p>
+              </div>
 
               {integration.last_synced_at && (
                 <p className="text-xs text-muted-foreground">
