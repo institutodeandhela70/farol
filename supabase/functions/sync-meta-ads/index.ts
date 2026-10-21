@@ -42,7 +42,7 @@ const STRUCTURE = {
   },
   ads: {
     edge: "ads",
-    limit: 100,
+    limit: 50,
     statuses: AD_STATUSES,
     fields:
       "id,adset_id,campaign_id,name,status,effective_status,created_time,updated_time,creative{id,name,title,body,thumbnail_url,image_url,object_type,call_to_action_type,effective_object_story_id,instagram_permalink_url}",
@@ -204,24 +204,33 @@ async function runSync(ctx: Ctx): Promise<Record<string, unknown>> {
   const bump = (k: string, n: number) => (summary[k] = (summary[k] ?? 0) + n);
   let pending = false;
 
+  let limitedNote: string | null = null;
   try {
     for (const acc of accounts) {
-      for (const ds of Object.keys(STRUCTURE) as StructureDataset[]) {
-        const finished = await syncStructure(ctx, acc.account_id, ds, (n) => bump(ds, n));
-        if (!finished) pending = true;
-      }
-      const insightsDone = await syncInsights(ctx, acc.account_id, "insights", (n) => bump("insights", n));
-      if (!insightsDone) pending = true;
-      for (const ds of Object.keys(BREAKDOWNS) as BreakdownDataset[]) {
-        const finished = await syncInsights(ctx, acc.account_id, ds, (n) => bump(ds, n));
-        if (!finished) pending = true;
+      // Limite de uso é por conta de anúncio: uma conta travada não impede as outras de avançar.
+      try {
+        for (const ds of Object.keys(STRUCTURE) as StructureDataset[]) {
+          const finished = await syncStructure(ctx, acc.account_id, ds, (n) => bump(ds, n));
+          if (!finished) pending = true;
+        }
+        const insightsDone = await syncInsights(ctx, acc.account_id, "insights", (n) => bump("insights", n));
+        if (!insightsDone) pending = true;
+        for (const ds of Object.keys(BREAKDOWNS) as BreakdownDataset[]) {
+          const finished = await syncInsights(ctx, acc.account_id, ds, (n) => bump(ds, n));
+          if (!finished) pending = true;
+        }
+      } catch (e) {
+        if (!(e instanceof RateLimited)) throw e;
+        pending = true;
+        limitedNote = `${acc.account_id}: ${e.message}`;
       }
     }
   } catch (e) {
     if (e instanceof OutOfTime) return { done: false, ...summary };
-    if (e instanceof RateLimited) return { done: false, rate_limited: true, note: e.message, ...summary };
     return { done: false, error: e instanceof Error ? e.message : String(e), ...summary };
   }
+  // Se alguma conta ficou limitada, não encadeia na hora (o cron de 15 min retoma) — mas as demais já avançaram.
+  if (limitedNote) return { done: false, rate_limited: true, note: limitedNote, ...summary };
   return { done: !pending, ...summary };
 }
 
