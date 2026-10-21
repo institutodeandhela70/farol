@@ -22,6 +22,9 @@ import {
   FileSpreadsheet,
   GraduationCap,
   Landmark,
+  Megaphone,
+  PieChart,
+  Layers,
   LayoutDashboard,
   type LucideIcon,
   Plug,
@@ -91,6 +94,16 @@ export const navGroups: NavGroup[] = [
       { id: "iuli/notas", label: "Notas Fiscais", icon: FileText },
       { id: "iuli/assinaturas", label: "Assinaturas", icon: Repeat },
       { id: "iuli/cadastros", label: "Projetos & Cadastros", icon: FolderKanban },
+    ],
+  },
+  {
+    id: "marketing",
+    label: "Marketing",
+    icon: Megaphone,
+    children: [
+      { id: "marketing/meta-ads", label: "Meta Ads", icon: LayoutDashboard },
+      { id: "marketing/meta-ads-campanhas", label: "Meta Ads · Campanhas", icon: Layers },
+      { id: "marketing/meta-ads-publico", label: "Meta Ads · Público", icon: PieChart },
     ],
   },
   {

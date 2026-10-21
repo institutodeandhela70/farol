@@ -55,6 +55,9 @@ import IuliReceber from "@/pages/financeiro-iuli/IuliReceber";
 import IuliNotas from "@/pages/financeiro-iuli/IuliNotas";
 import IuliAssinaturas from "@/pages/financeiro-iuli/IuliAssinaturas";
 import IuliCadastros from "@/pages/financeiro-iuli/IuliCadastros";
+import MetaAdsVisaoGeral from "@/pages/marketing/MetaAdsVisaoGeral";
+import MetaAdsCampanhas from "@/pages/marketing/MetaAdsCampanhas";
+import MetaAdsPublico from "@/pages/marketing/MetaAdsPublico";
 
 const allRoutes = [...topLevelLinks, ...navGroups.flatMap((group) => group.children)];
 
@@ -91,6 +94,9 @@ const customPages: Record<string, ComponentType> = {
   "iuli/notas": IuliNotas,
   "iuli/assinaturas": IuliAssinaturas,
   "iuli/cadastros": IuliCadastros,
+  "marketing/meta-ads": MetaAdsVisaoGeral,
+  "marketing/meta-ads-campanhas": MetaAdsCampanhas,
+  "marketing/meta-ads-publico": MetaAdsPublico,
 };
 
 const queryClient = new QueryClient({
@@ -127,6 +133,7 @@ function App() {
                     <Route path="resultado" element={<Navigate to="/resultado/visao-geral" replace />} />
                     <Route path="comercial" element={<Navigate to="/comercial/visao-geral" replace />} />
                     <Route path="iuli" element={<Navigate to="/iuli/visao-geral" replace />} />
+                    <Route path="marketing" element={<Navigate to="/marketing/meta-ads" replace />} />
                     {allRoutes.map((route) => {
                       const CustomPage = customPages[route.id];
                       return (
