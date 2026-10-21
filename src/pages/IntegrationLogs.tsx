@@ -30,6 +30,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   vsix: "VSIX",
   iuli: "IULI",
   brevo: "Brevo",
+  meta: "Meta",
 };
 
 interface IntegrationOption {

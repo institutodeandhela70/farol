@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { saveIntegrationCredential } from "@/lib/integrations";
 import { IuliIntegrationDialog } from "@/components/iuli/IuliIntegrationDialog";
+import { MetaIntegrationDialog } from "@/components/meta/MetaIntegrationDialog";
 import { useWorkspace } from "@/hooks/WorkspaceProvider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type IntegrationStatus = "disconnected" | "connected" | "error";
-type ProviderId = "asaas" | "hubla" | "hubspot" | "tmb" | "vsix" | "iuli" | "brevo";
+type ProviderId = "asaas" | "hubla" | "hubspot" | "tmb" | "vsix" | "iuli" | "brevo" | "meta";
 
 interface IntegrationRow {
   id: string;
@@ -101,6 +102,7 @@ const PROVIDERS: ProviderDef[] = [
   { id: "vsix", name: "VSIX", description: "Mensageria de WhatsApp.", color: "#25D366", letter: "V" },
   { id: "iuli", name: "IULI", description: "ERP financeiro — vendas, a receber, assinaturas.", color: "#2563EB", letter: "I" },
   { id: "brevo", name: "Brevo", description: "E-mail transacional — boas-vindas, reset de senha.", color: "#0B996E", letter: "B" },
+  { id: "meta", name: "Meta", description: "Meta Ads e Instagram — campanhas, métricas, posts.", color: "#1877F2", letter: "M" },
   { id: "hotmart", name: "Hotmart", description: "Em breve.", color: "#64748B", letter: "H", comingSoon: true },
 ];
 
@@ -640,6 +642,9 @@ export default function Integracoes() {
   // --- IULI (uma conexão por empresa — ver IuliIntegrationDialog) ---
   const [iuliIntegration, setIuliIntegration] = useState<IntegrationRow | null>(null);
 
+  // --- Meta (estado de carga vive no MetaIntegrationDialog) ---
+  const [metaIntegration, setMetaIntegration] = useState<IntegrationRow | null>(null);
+
   // --- Brevo ---
   const [brevoIntegration, setBrevoIntegration] = useState<IntegrationRow | null>(null);
   const [brevoApiKey, setBrevoApiKey] = useState("");
@@ -767,6 +772,7 @@ export default function Integracoes() {
     vsix: vsixIntegration,
     iuli: iuliIntegration,
     brevo: brevoIntegration,
+    meta: metaIntegration,
   };
 
   const connectedProviders = PROVIDERS.filter(
@@ -1283,6 +1289,14 @@ export default function Integracoes() {
         onOpenChange={(o) => setOpenDialog(o ? "iuli" : null)}
         onSummaryChange={(summary) => setIuliIntegration(summary as IntegrationRow | null)}
         renderDiagnostics={(d) => <DiagnosticsTable diagnostics={d} />}
+      />
+
+      {/* --- Modal Meta --- */}
+      <MetaIntegrationDialog
+        workspaceId={workspace?.id}
+        open={openDialog === "meta"}
+        onOpenChange={(o) => setOpenDialog(o ? "meta" : null)}
+        onSummaryChange={(row) => setMetaIntegration(row as IntegrationRow | null)}
       />
 
       {/* --- Modal Brevo --- */}

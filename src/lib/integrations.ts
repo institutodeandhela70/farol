@@ -2,7 +2,7 @@ import { supabase } from "@/lib/supabase";
 
 interface SaveCredentialParams {
   workspaceId: string;
-  provider: "asaas" | "hubla" | "hotmart" | "tmb" | "hubspot" | "vsix" | "iuli" | "brevo";
+  provider: "asaas" | "hubla" | "hotmart" | "tmb" | "hubspot" | "vsix" | "iuli" | "brevo" | "meta";
   config: Record<string, unknown>;
   secretValue: string;
   // Só a TMB usa isso hoje: ela tem duas credenciais distintas (Bearer token
