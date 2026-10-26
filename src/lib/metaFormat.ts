@@ -9,6 +9,8 @@ export const META_SECTIONS: ShellSection[] = [
   { id: "marketing/instagram", label: "Instagram" },
   { id: "marketing/instagram-conteudo", label: "Conteúdo" },
   { id: "marketing/instagram-audiencia", label: "Audiência" },
+  { id: "marketing/painel-dp100k", label: "Painel DP100K" },
+  { id: "marketing/painel-ipl-fortaleza", label: "Painel IPL Fortaleza" },
 ];
 
 export const brl = (v: number | null | undefined) =>

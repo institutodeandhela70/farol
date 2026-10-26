@@ -26,6 +26,8 @@ import {
   PieChart,
   Layers,
   Camera,
+  Rocket,
+  Ticket,
   MessageSquare,
   LayoutDashboard,
   type LucideIcon,
@@ -109,6 +111,8 @@ export const navGroups: NavGroup[] = [
       { id: "marketing/instagram", label: "Instagram", icon: Camera },
       { id: "marketing/instagram-conteudo", label: "Instagram · Conteúdo", icon: Layers },
       { id: "marketing/instagram-audiencia", label: "Instagram · Audiência", icon: MessageSquare },
+      { id: "marketing/painel-dp100k", label: "Painel DP100K", icon: Rocket },
+      { id: "marketing/painel-ipl-fortaleza", label: "Painel IPL Fortaleza", icon: Ticket },
     ],
   },
   {

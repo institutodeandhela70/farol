@@ -61,6 +61,8 @@ import MetaAdsPublico from "@/pages/marketing/MetaAdsPublico";
 import InstagramVisaoGeral from "@/pages/marketing/InstagramVisaoGeral";
 import InstagramConteudo from "@/pages/marketing/InstagramConteudo";
 import InstagramAudiencia from "@/pages/marketing/InstagramAudiencia";
+import LaunchDp100k from "@/pages/marketing/LaunchDp100k";
+import LaunchIplFortaleza from "@/pages/marketing/LaunchIplFortaleza";
 
 const allRoutes = [...topLevelLinks, ...navGroups.flatMap((group) => group.children)];
 
@@ -103,6 +105,8 @@ const customPages: Record<string, ComponentType> = {
   "marketing/instagram": InstagramVisaoGeral,
   "marketing/instagram-conteudo": InstagramConteudo,
   "marketing/instagram-audiencia": InstagramAudiencia,
+  "marketing/painel-dp100k": LaunchDp100k,
+  "marketing/painel-ipl-fortaleza": LaunchIplFortaleza,
 };
 
 const queryClient = new QueryClient({
