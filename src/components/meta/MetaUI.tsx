@@ -3,6 +3,7 @@ import { CommercialShell, FilterBar, MultiSelect, WarnNote } from "@/components/
 import { ResultPeriodBar } from "@/components/result/ResultUI";
 import { useWorkspace } from "@/hooks/WorkspaceProvider";
 import { useMetaAccounts, useMetaFilters, useMetaFreshness } from "@/lib/metaAds";
+import { useIgAccounts, useIgFreshness } from "@/lib/metaInstagram";
 import { formatDayBR } from "@/lib/iuliFilters";
 import { META_SECTIONS } from "@/lib/metaFormat";
 
@@ -50,6 +51,45 @@ function FreshnessNote() {
       <WarnNote>
         Carga do histórico em andamento: {data.accountsLoaded} de {data.accountsTotal} contas com métricas completas
         {data.loadedThrough ? ` (até ${formatDayBR(data.loadedThrough)})` : ""}. Os números abaixo podem estar parciais até terminar.
+      </WarnNote>
+    );
+  }
+  return null;
+}
+
+/** Casca das telas do Instagram: período + aviso de carga em andamento. */
+export function IgShell({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+  const { filters, set } = useMetaFilters();
+  return (
+    <CommercialShell
+      eyebrow="Marketing"
+      sections={META_SECTIONS}
+      title={title}
+      description={description}
+      filters={
+        <FilterBar>
+          <ResultPeriodBar filters={filters} set={set} />
+        </FilterBar>
+      }
+    >
+      <IgFreshnessNote />
+      {children}
+    </CommercialShell>
+  );
+}
+
+function IgFreshnessNote() {
+  const { workspace } = useWorkspace();
+  const accounts = useIgAccounts(workspace?.id);
+  const { data } = useIgFreshness(workspace?.id);
+  if (!accounts.data) return null;
+  if (accounts.data.length === 0) return <WarnNote>Nenhum perfil do Instagram habilitado. Conecte a Meta em Configurações → Integrações.</WarnNote>;
+  if (!data) return null;
+  if (data.running) {
+    return (
+      <WarnNote>
+        Carga do histórico em andamento: {data.mediaListed.toLocaleString("pt-BR")} posts e reels listados, {data.mediaWithInsights.toLocaleString("pt-BR")} com métricas
+        {data.accountDaysThrough ? `; métricas diárias da conta até ${formatDayBR(data.accountDaysThrough)}` : ""}. Os números podem estar parciais até terminar.
       </WarnNote>
     );
   }

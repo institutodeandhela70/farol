@@ -25,6 +25,8 @@ import {
   Megaphone,
   PieChart,
   Layers,
+  Camera,
+  MessageSquare,
   LayoutDashboard,
   type LucideIcon,
   Plug,
@@ -104,6 +106,9 @@ export const navGroups: NavGroup[] = [
       { id: "marketing/meta-ads", label: "Meta Ads", icon: LayoutDashboard },
       { id: "marketing/meta-ads-campanhas", label: "Meta Ads · Campanhas", icon: Layers },
       { id: "marketing/meta-ads-publico", label: "Meta Ads · Público", icon: PieChart },
+      { id: "marketing/instagram", label: "Instagram", icon: Camera },
+      { id: "marketing/instagram-conteudo", label: "Instagram · Conteúdo", icon: Layers },
+      { id: "marketing/instagram-audiencia", label: "Instagram · Audiência", icon: MessageSquare },
     ],
   },
   {

@@ -58,6 +58,9 @@ import IuliCadastros from "@/pages/financeiro-iuli/IuliCadastros";
 import MetaAdsVisaoGeral from "@/pages/marketing/MetaAdsVisaoGeral";
 import MetaAdsCampanhas from "@/pages/marketing/MetaAdsCampanhas";
 import MetaAdsPublico from "@/pages/marketing/MetaAdsPublico";
+import InstagramVisaoGeral from "@/pages/marketing/InstagramVisaoGeral";
+import InstagramConteudo from "@/pages/marketing/InstagramConteudo";
+import InstagramAudiencia from "@/pages/marketing/InstagramAudiencia";
 
 const allRoutes = [...topLevelLinks, ...navGroups.flatMap((group) => group.children)];
 
@@ -97,6 +100,9 @@ const customPages: Record<string, ComponentType> = {
   "marketing/meta-ads": MetaAdsVisaoGeral,
   "marketing/meta-ads-campanhas": MetaAdsCampanhas,
   "marketing/meta-ads-publico": MetaAdsPublico,
+  "marketing/instagram": InstagramVisaoGeral,
+  "marketing/instagram-conteudo": InstagramConteudo,
+  "marketing/instagram-audiencia": InstagramAudiencia,
 };
 
 const queryClient = new QueryClient({

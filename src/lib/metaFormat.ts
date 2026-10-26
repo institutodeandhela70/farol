@@ -3,9 +3,12 @@ import type { ShellSection } from "@/components/commercial/CommercialUI";
 // Formatadores e seções do menu Marketing · Meta Ads.
 
 export const META_SECTIONS: ShellSection[] = [
-  { id: "marketing/meta-ads", label: "Visão Geral" },
+  { id: "marketing/meta-ads", label: "Meta Ads" },
   { id: "marketing/meta-ads-campanhas", label: "Campanhas" },
   { id: "marketing/meta-ads-publico", label: "Público & Ações" },
+  { id: "marketing/instagram", label: "Instagram" },
+  { id: "marketing/instagram-conteudo", label: "Conteúdo" },
+  { id: "marketing/instagram-audiencia", label: "Audiência" },
 ];
 
 export const brl = (v: number | null | undefined) =>

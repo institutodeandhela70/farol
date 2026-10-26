@@ -448,3 +448,6 @@ verify_jwt = false
 
 [functions.sync-meta-ads]
 verify_jwt = false
+
+[functions.sync-meta-instagram]
+verify_jwt = false

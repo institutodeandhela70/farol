@@ -134,6 +134,8 @@ export function MetaIntegrationDialog({
   const [savedIgs, setSavedIgs] = useState<IgAccountRow[]>([]);
   const [progress, setProgress] = useState<SyncProgress | null>(null);
   const [adsSyncing, setAdsSyncing] = useState(false);
+  const [igSyncing, setIgSyncing] = useState(false);
+  const [igProgress, setIgProgress] = useState<{ media: number; withInsights: number; days: number; comments: number; running: boolean; error: string | null } | null>(null);
 
   const load = useCallback(async () => {
     if (!workspaceId) return;
@@ -177,6 +179,23 @@ export function MetaIntegrationDialog({
       const { count: c } = await supabase.from(table).select("*", { count: "exact", head: true }).eq("workspace_id", workspaceId);
       return c ?? 0;
     };
+    const [igMedia, igWithInsights, igDays, igComments, igState] = await Promise.all([
+      count("meta_ig_media"),
+      supabase.from("meta_ig_media").select("*", { count: "exact", head: true }).eq("workspace_id", workspaceId).not("insights_synced_at", "is", null).then((r) => r.count ?? 0),
+      count("meta_ig_account_daily"),
+      count("meta_ig_comments"),
+      supabase.from("meta_sync_state").select("dataset, cursor_date, cycle_started_at, last_error, updated_at").eq("integration_id", integration.id).like("dataset", "ig\_%"),
+    ]);
+    const igRows = (igState.data ?? []).filter((r) => r.dataset !== "ig_stories");
+    setIgProgress({
+      media: igMedia,
+      withInsights: igWithInsights,
+      days: igDays,
+      comments: igComments,
+      running: igRows.some((r) => (r.cursor_date || r.cycle_started_at) && Date.now() - new Date(r.updated_at as string).getTime() < 5 * 60_000),
+      error: (igRows.find((r) => r.last_error)?.last_error as string | undefined) ?? null,
+    });
+
     const [campaigns, adsets, ads, insights, breakdowns, state] = await Promise.all([
       count("meta_campaigns"),
       count("meta_adsets"),
@@ -325,6 +344,22 @@ export function MetaIntegrationDialog({
     }
     setDiagnosis(null);
     await load();
+  };
+
+  const handleSyncIg = async () => {
+    if (!integration) return;
+    setIgSyncing(true);
+    setFeedback(null);
+    const { data, error } = await supabase.functions.invoke("sync-meta-instagram", {
+      body: { integration_id: integration.id, background: true, force: true },
+    });
+    setIgSyncing(false);
+    if (error || data?.error) {
+      setFeedback({ type: "error", text: `Falha ao iniciar: ${data?.error ?? error?.message}` });
+      return;
+    }
+    setFeedback({ type: "success", text: "Sincronização do Instagram iniciada em segundo plano." });
+    await loadProgress();
   };
 
   const grantedPerms = new Set((diagnosis?.permissions ?? []).filter((p) => p.status === "granted").map((p) => p.permission));
@@ -497,6 +532,27 @@ export function MetaIntegrationDialog({
                   Histórico a partir de 01/01/2025, em lotes. Depois disso atualiza sozinho a cada 3 horas, relendo os últimos 28 dias.
                 </p>
               </div>
+
+              {igs.length > 0 && (
+                <div className="flex flex-col gap-2 rounded-lg border border-border p-3 text-sm">
+                  <p className="font-medium">Instagram</p>
+                  {igProgress && (
+                    <ul className="text-xs text-muted-foreground">
+                      <li>Posts e reels: {igProgress.media.toLocaleString("pt-BR")} ({igProgress.withInsights.toLocaleString("pt-BR")} com métricas)</li>
+                      <li>Dias de métricas da conta: {igProgress.days.toLocaleString("pt-BR")}</li>
+                      <li>Comentários: {igProgress.comments.toLocaleString("pt-BR")}</li>
+                    </ul>
+                  )}
+                  {igProgress?.running && <p className="text-xs text-primary">Carregando em segundo plano...</p>}
+                  {igProgress?.error && <p className="text-xs text-destructive">Último erro: {igProgress.error}</p>}
+                  <Button variant="outline" onClick={handleSyncIg} disabled={igSyncing || igProgress?.running}>
+                    {igSyncing ? "Iniciando..." : igProgress?.running ? "Sincronização em andamento" : "Sincronizar Instagram"}
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Posts, reels, stories (capturados enquanto estão no ar), métricas diárias desde 01/01/2025, audiência e comentários. Atualiza sozinho a cada poucas horas.
+                  </p>
+                </div>
+              )}
 
               {integration.last_synced_at && (
                 <p className="text-xs text-muted-foreground">
