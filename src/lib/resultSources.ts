@@ -34,7 +34,7 @@ const CX = {
   map: farol("iuli_category_map", "De-para categoria da IULI → produto"),
 };
 const RECEITA_RULE =
-  "Receita = o que foi faturado na IULI, pela DATA DE COMPETÊNCIA (a venda que já está na IULI, tenha o dinheiro sido creditado ou não). Entram os títulos de categoria de produto com e sem baixa: com baixa = já recebido; sem baixa = a receber (o dinheiro entra no vencimento, que é o Caixa). Valor: recebido = valor pago; a receber = valor previsto. Cada título é ligado ao negócio ganho do HubSpot (para os produtos dos 6, só Contratos) pelo cliente e produto; a data do ganho diz se a venda é do mês da competência ou de outro mês.";
+  "Receita = o que foi faturado na IULI, pela DATA DE COMPETÊNCIA (a venda que já está na IULI, tenha o dinheiro sido creditado ou não). Entram os títulos de categoria de produto com e sem baixa (e os da categoria \"RECEITA A CLASSIFICAR\", contados como produto \"(a classificar)\" até serem categorizados na IULI): com baixa = já recebido; sem baixa = a receber (o dinheiro entra no vencimento, que é o Caixa). Valor: recebido = valor pago; a receber = valor previsto. Cada título é ligado ao negócio ganho do HubSpot (para os produtos dos 6, só Contratos) pelo cliente e produto; a data do ganho diz se a venda é do mês da competência ou de outro mês.";
 const RX = {
   pago: rec("itens[].valor_pago", "Valor recebido"),
   pagamento: rec("itens[].pagamento", "Data do pagamento"),
@@ -46,7 +46,7 @@ const RX = {
 const LINK_NOTE =
   "Vínculo: nome do cliente da IULI igual ao do negócio (ou a uma das pessoas de um combo \"A e B\"), mesmo produto; para os produtos dos 6 só vale negócio da pipeline de Contratos (a data do ganho é a da venda, não a do pagamento na Hubla); vale o negócio ganho mais próximo da data da entrada (até 45 dias depois). Sem negócio do mesmo cliente e produto, a entrada continua contando, só não dá para datar a venda.";
 const CAIXA_RULE =
-  "Caixa = receitas da IULI pela data de vencimento. Só entram categorias de produto (de-para em Categorias). Recebido = valor pago; a vencer e vencido = valor previsto. Vencido = sem baixa e com vencimento anterior a hoje (fuso de São Paulo).";
+  "Caixa = receitas da IULI pela data de vencimento. Só entram categorias de produto (de-para em Categorias); \"RECEITA A CLASSIFICAR\" entra como produto \"(a classificar)\" até ser categorizada na IULI. Recebido = valor pago; a vencer e vencido = valor previsto. Vencido = sem baixa e com vencimento anterior a hoje (fuso de São Paulo).";
 
 const SP = "Dia do ganho no fuso de São Paulo.";
 const SCOPE =

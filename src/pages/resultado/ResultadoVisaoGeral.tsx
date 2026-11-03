@@ -147,7 +147,7 @@ function Content() {
     {
       show: revClassify.total > 0,
       tone: "warn",
-      text: `${formatCount(revClassify.qtd)} lançamentos (${formatMoney(revClassify.total)}) estão na categoria "RECEITA A CLASSIFICAR" da IULI: o dinheiro entrou, mas ninguém informou de qual produto é, então ficam fora da Receita. Para resolver, troque a categoria de cada um para a do produto dentro da IULI (o FAROL atualiza sozinho em até 15 minutos).`,
+      text: `${formatCount(revClassify.qtd)} lançamentos (${formatMoney(revClassify.total)}) estão na categoria "RECEITA A CLASSIFICAR" da IULI: o dinheiro entrou, mas ninguém informou de qual produto é. Já estão contados na Receita, como produto "(a classificar)". Para ir ao produto certo, troque a categoria de cada um dentro da IULI (o FAROL atualiza sozinho em até 15 minutos).`,
       to: "receita",
       cta: "Ver os lançamentos",
       onClick: () => open("receita", { title: "Lançamentos a classificar", tratamento: "a_classificar", subtitle: `${period} · troque a categoria de cada um para a do produto, dentro da IULI` }),
@@ -155,7 +155,7 @@ function Content() {
     {
       show: cashClassify.total > 0,
       tone: "warn",
-      text: `${formatCount(cashClassify.qtd)} lançamentos (${formatMoney(cashClassify.total)}) com vencimento no período estão na categoria "RECEITA A CLASSIFICAR" da IULI e ficam fora do Caixa até receberem a categoria do produto (troque dentro da IULI).`,
+      text: `${formatCount(cashClassify.qtd)} lançamentos (${formatMoney(cashClassify.total)}) com vencimento no período estão na categoria "RECEITA A CLASSIFICAR" da IULI. Já estão contados no Caixa, como produto "(a classificar)", até receberem a categoria do produto (troque dentro da IULI).`,
       to: "caixa",
       cta: "Ver os lançamentos",
       onClick: () => open("caixa", { title: "Lançamentos a classificar", tratamento: "a_classificar", subtitle: `${period} · troque a categoria de cada um para a do produto, dentro da IULI` }),

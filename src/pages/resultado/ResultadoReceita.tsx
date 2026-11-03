@@ -114,7 +114,7 @@ function Content() {
     return { entradas: entradas.reverse(), vendas, cell, sem, rowTotal, max, hidden };
   }, [safra.data, filters]);
 
-  const outGroups = useMemo(() => {
+  const outAll = useMemo(() => {
     const map = new Map<string, { total: number; qtd: number; cats: { categoria: string; total: number }[] }>();
     for (const r of out.data ?? []) {
       const cur = map.get(r.tratamento) ?? { total: 0, qtd: 0, cats: [] };
@@ -126,9 +126,11 @@ function Content() {
     for (const g of map.values()) g.cats.sort((a, b) => b.total - a.total);
     return [...map.entries()].sort((a, b) => OUT_ORDER.indexOf(a[0]) - OUT_ORDER.indexOf(b[0]));
   }, [out.data]);
+  // "A classificar" já é contabilizado no total (como produto "(a classificar)"): só aparece no aviso, não no bloco "fora da soma".
+  const outGroups = outAll.filter(([t]) => t !== "a_classificar");
 
   const outTotal = outGroups.reduce((a, [, g]) => a + g.total, 0);
-  const toClassify = outGroups.find(([t]) => t === "a_classificar")?.[1];
+  const toClassify = outAll.find(([t]) => t === "a_classificar")?.[1];
   const noCategory = outGroups.find(([t]) => t === "sem_categoria")?.[1];
   const linked = k.mes.total + k.outros.total;
 
@@ -165,14 +167,14 @@ function Content() {
     >
       {toClassify && toClassify.total > 0 && (
         <WarnNote>
-          <b>Precisa categorizar:</b> {formatCount(toClassify.qtd)} lançamentos ({formatMoney(toClassify.total)}) com competência no período estão na categoria &quot;RECEITA A CLASSIFICAR&quot; da IULI, ou seja, o dinheiro entrou mas ninguém informou de qual produto é. Por isso ficam fora da Receita.{" "}
+          <b>Precisa categorizar:</b> {formatCount(toClassify.qtd)} lançamentos ({formatMoney(toClassify.total)}) com competência no período estão na categoria &quot;RECEITA A CLASSIFICAR&quot; da IULI: o dinheiro entrou, mas ninguém informou de qual produto é. Eles <b>estão sendo contados</b> no total da Receita, mas aparecem como produto &quot;(a classificar)&quot; até serem categorizados.{" "}
           <button
             type="button"
             className="font-semibold underline underline-offset-2"
             onClick={() =>
               open({
                 title: "Lançamentos a classificar",
-                subtitle: `${period} · para somarem na Receita, troque a categoria de cada um para a do produto, dentro da IULI (o FAROL atualiza sozinho em até 15 minutos)`,
+                subtitle: `${period} · já contam no total; troque a categoria de cada um para a do produto, dentro da IULI (o FAROL atualiza sozinho em até 15 minutos)`,
                 tratamento: "a_classificar",
               })
             }
@@ -180,7 +182,7 @@ function Content() {
             Ver os {formatCount(toClassify.qtd)} lançamentos
           </button>
           <span className="mt-1 block text-xs opacity-80">
-            Como resolver: abra cada lançamento na IULI e troque a categoria &quot;RECEITA A CLASSIFICAR&quot; pela do produto. Não é preciso mexer no FAROL. Quando todos forem categorizados, este aviso some.
+            Como resolver: abra cada lançamento na IULI e troque a categoria &quot;RECEITA A CLASSIFICAR&quot; pela do produto. Não é preciso mexer no FAROL. O total não muda; o valor passa de &quot;(a classificar)&quot; para o produto certo e este aviso some.
           </span>
         </WarnNote>
       )}
@@ -459,7 +461,7 @@ function Content() {
           <h2 className="text-base font-semibold text-amber-900 dark:text-amber-200">Faturado no período, mas fora da soma</h2>
           <span className="rounded-full bg-amber-200 px-2.5 py-1 text-xs font-semibold text-amber-900 dark:bg-amber-900/60 dark:text-amber-200">FORA DA SOMA · {formatMoney(outTotal)}</span>
         </div>
-        <p className="text-sm text-amber-900/90 dark:text-amber-200/90">Não são receita de produto (ou ainda não têm a categoria do produto). Não entram em nenhum total da Receita. Clique para ver as linhas; as categorias se ajustam em Categorias.</p>
+        <p className="text-sm text-amber-900/90 dark:text-amber-200/90">Não são receita de produto (ou ainda não têm categoria). Não entram em nenhum total da Receita. Clique para ver as linhas; as categorias se ajustam em Categorias.</p>
         {out.isLoading ? (
           <LoadingBlock className="h-24" />
         ) : outGroups.length ? (
