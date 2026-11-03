@@ -120,7 +120,23 @@ function Content() {
     >
       {toClassify && toClassify.total > 0 && (
         <WarnNote>
-          <b>Precisa categorizar:</b> {formatCount(toClassify.qtd)} lançamentos ({formatMoney(toClassify.total)}) com vencimento no período estão em &quot;a classificar&quot; na IULI e ficam fora do Caixa até receberem a categoria do produto.
+          <b>Precisa categorizar:</b> {formatCount(toClassify.qtd)} lançamentos ({formatMoney(toClassify.total)}) com vencimento no período estão na categoria &quot;RECEITA A CLASSIFICAR&quot; da IULI, ou seja, o dinheiro entrou mas ninguém informou de qual produto é. Por isso ficam fora do Caixa.{" "}
+          <button
+            type="button"
+            className="font-semibold underline underline-offset-2"
+            onClick={() =>
+              open({
+                title: "Lançamentos a classificar",
+                subtitle: `${period} · para somarem no Caixa, troque a categoria de cada um para a do produto, dentro da IULI (o FAROL atualiza sozinho em até 15 minutos)`,
+                tratamento: "a_classificar",
+              })
+            }
+          >
+            Ver os {formatCount(toClassify.qtd)} lançamentos
+          </button>
+          <span className="mt-1 block text-xs opacity-80">
+            Como resolver: abra cada lançamento na IULI e troque a categoria &quot;RECEITA A CLASSIFICAR&quot; pela do produto. Não é preciso mexer no FAROL. Quando todos forem categorizados, este aviso some.
+          </span>
         </WarnNote>
       )}
 
