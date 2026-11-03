@@ -210,7 +210,7 @@ function Content() {
             <LoadingBlock />
           ) : k.produtos.length ? (
             <ClickBarList
-              items={k.produtos.slice(0, 10).map(([produto, v]) => ({
+              items={[...k.produtos.slice(0, 10), ...k.produtos.slice(10).filter(([produto]) => produto === "(a classificar)")].map(([produto, v]) => ({
                 key: produto,
                 label: produto,
                 value: v.total,
