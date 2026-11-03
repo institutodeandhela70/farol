@@ -144,8 +144,22 @@ function Content() {
     { show: k.foraQtd > 0, tone: "warn", text: `${neg(k.foraQtd)} (${formatMoney(k.foraTotal)}) na pipeline de Contratos são de produtos fora dos 6 e ficam fora das Vendas.`, to: "vendas", cta: "Ver em Vendas" },
     { show: k.semProduto > 0, tone: "warn", text: `${neg(k.semProduto)} da Hubla & TMB estão sem produto preenchido no HubSpot.`, to: "vendas", cta: "Ver em Vendas" },
     { show: dupQtd > 0, tone: "info", text: `${neg(dupQtd)} (${formatMoney(dupTotal)}) da Hubla & TMB são pagamentos de produtos dos 6 e ficam fora das Vendas (a venda é a de Contratos).`, to: "vendas", cta: "Ver quais" },
-    { show: revClassify.total > 0, tone: "warn", text: `${formatCount(revClassify.qtd)} lançamentos (${formatMoney(revClassify.total)}) estão em "a classificar" na IULI e ficam fora da Receita. Precisa categorizar.`, to: "receita", cta: "Ver em Receita" },
-    { show: cashClassify.total > 0, tone: "warn", text: `${formatCount(cashClassify.qtd)} lançamentos (${formatMoney(cashClassify.total)}) com vencimento no período estão em "a classificar" e ficam fora do Caixa.`, to: "caixa", cta: "Ver em Caixa" },
+    {
+      show: revClassify.total > 0,
+      tone: "warn",
+      text: `${formatCount(revClassify.qtd)} lançamentos (${formatMoney(revClassify.total)}) estão na categoria "RECEITA A CLASSIFICAR" da IULI: o dinheiro entrou, mas ninguém informou de qual produto é, então ficam fora da Receita. Para resolver, troque a categoria de cada um para a do produto dentro da IULI (o FAROL atualiza sozinho em até 15 minutos).`,
+      to: "receita",
+      cta: "Ver os lançamentos",
+      onClick: () => open("receita", { title: "Lançamentos a classificar", tratamento: "a_classificar", subtitle: `${period} · troque a categoria de cada um para a do produto, dentro da IULI` }),
+    },
+    {
+      show: cashClassify.total > 0,
+      tone: "warn",
+      text: `${formatCount(cashClassify.qtd)} lançamentos (${formatMoney(cashClassify.total)}) com vencimento no período estão na categoria "RECEITA A CLASSIFICAR" da IULI e ficam fora do Caixa até receberem a categoria do produto (troque dentro da IULI).`,
+      to: "caixa",
+      cta: "Ver os lançamentos",
+      onClick: () => open("caixa", { title: "Lançamentos a classificar", tratamento: "a_classificar", subtitle: `${period} · troque a categoria de cada um para a do produto, dentro da IULI` }),
+    },
     { show: k.sem > 0, tone: "info", text: `${formatMoney(k.sem)} da receita não tem negócio vinculado (contam na receita, mas não dá para datar a venda).`, to: "receita", cta: "Conciliar" },
     { show: !!agingOld && agingOld.total > 0, tone: "info", text: `${formatMoney(agingOld?.total ?? 0)} vencidos há mais de 1 ano: provável baixa não registrada na IULI, e não inadimplência.`, to: "caixa", cta: "Ver em Caixa" },
     { show: noCategory.total > 0, tone: "info", text: `${formatMoney(noCategory.total)} de lançamentos ainda sem categoria carregada (a carga histórica continua em segundo plano).`, to: "receita", cta: "Ver em Receita" },
@@ -292,7 +306,13 @@ function Content() {
                   <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", a.tone === "warn" ? "bg-amber-500" : "bg-sky-500")} aria-hidden />
                   <span>{a.text}</span>
                 </span>
-                <DetailLink to={a.to}>{a.cta}</DetailLink>
+                {"onClick" in a && a.onClick ? (
+                  <button type="button" onClick={a.onClick} className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
+                    {a.cta}
+                  </button>
+                ) : (
+                  <DetailLink to={a.to}>{a.cta}</DetailLink>
+                )}
               </li>
             ))}
           </ul>
