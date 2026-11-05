@@ -20,6 +20,7 @@ export const BASE_LABEL: Record<SearchBase, string> = {
 };
 
 export const METHOD_LABEL: Record<string, string> = {
+  hubla_id: "ID da fatura da Hubla (exato)",
   nome: "Nome do cliente + produto",
   documento: "CPF igual ao do negócio",
   email: "E-mail igual ao do contato",

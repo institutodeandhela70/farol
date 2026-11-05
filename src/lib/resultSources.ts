@@ -44,7 +44,7 @@ const RX = {
   links: farol("receita_links", "Vínculo entrada × negócio (atualizado de hora em hora)"),
 };
 const LINK_NOTE =
-  "Vínculo: nome do cliente da IULI igual ao do negócio (ou a uma das pessoas de um combo \"A e B\"), mesmo produto; para os produtos dos 6 só vale negócio da pipeline de Contratos (a data do ganho é a da venda, não a do pagamento na Hubla); vale o negócio ganho mais próximo da data da entrada (até 45 dias depois). Sem negócio do mesmo cliente e produto, a entrada continua contando, só não dá para datar a venda.";
+  "Vínculo (nesta ordem): 1) ID da fatura da Hubla — a venda da IULI guarda o ID e o negócio da Hubla & TMB no HubSpot guarda o mesmo (nos produtos dos 6, sobe ao negócio de Contratos do mesmo produto e contato); 2) nome do cliente da IULI igual ao do negócio (ou a uma das pessoas de um combo \"A e B\"), mesmo produto; para os produtos dos 6 só vale negócio da pipeline de Contratos (a data do ganho é a da venda, não a do pagamento na Hubla); vale o negócio ganho mais próximo da data da entrada (até 45 dias depois). Sem negócio do mesmo cliente e produto, a entrada continua contando, só não dá para datar a venda.";
 const CAIXA_RULE =
   "Caixa = receitas da IULI pela data de vencimento. Só entram categorias de produto (de-para em Categorias); \"RECEITA A CLASSIFICAR\" entra como produto \"(a classificar)\" até ser categorizada na IULI. Recebido = valor pago; a vencer e vencido = valor previsto. Vencido = sem baixa e com vencimento anterior a hoje (fuso de São Paulo).";
 
